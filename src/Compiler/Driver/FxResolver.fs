@@ -580,6 +580,7 @@ type internal FxResolver
             "System.Core"
             "System.Configuration"
 
+//@@@@@            getfscorlibLibraryName
             getFSharpCoreLibraryName
             if useFsiAuxLib then
                 getFsiLibraryName
@@ -634,6 +635,7 @@ type internal FxResolver
                 "mscorlib"
                 "netstandard"
                 "System"
+                getfscorlibLibraryName
                 getFSharpCoreLibraryName
                 "FSharp.Compiler.Interactive.Settings"
                 "Microsoft.CSharp"

@@ -708,7 +708,7 @@ type TcAssemblyResolutions(tcConfig: TcConfig, results: AssemblyResolution list,
 
             let assumeDotNetFramework = primaryReference.SimpleAssemblyNameIs("mscorlib")
 
-            if not tcConfig.compilingFSharpCore then
+            if not tcConfig.compilingCoreLibrary then
                 tcConfig.CoreLibraryDllReference()
 
                 if assumeDotNetFramework then
@@ -2434,9 +2434,15 @@ and [<Sealed>] TcImports
 
             let! fslibCcu, fsharpCoreAssemblyScopeRef =
                 node {
-                    if tcConfig.compilingFSharpCore then
+                    if tcConfig.compilingfscorlib then
+                        // When compiling fscorlib.dll, the fslibCcu reference to fscorlib.dll is a delayed ccu thunk fixed up during type checking
+                        return CcuThunk.CreateDelayed getfscorlibLibraryName, ILScopeRef.Local
+                    elif tcConfig.compilingCoreLibrary then
                         // When compiling FSharp.Core.dll, the fslibCcu reference to FSharp.Core.dll is a delayed ccu thunk fixed up during type checking
                         return CcuThunk.CreateDelayed getFSharpCoreLibraryName, ILScopeRef.Local
+                    //elif tcConfig.compilingCoreLibrary then
+                    //    // When compiling FSharp.Core.dll, the fslibCcu reference to FSharp.Core.dll is a delayed ccu thunk fixed up during type checking
+                    //    return CcuThunk.CreateDelayed getfscorlibLibraryName, ILScopeRef.Local
                     else
                         let coreLibraryReference = tcConfig.CoreLibraryDllReference()
 
@@ -2484,7 +2490,7 @@ and [<Sealed>] TcImports
             // OK, now we have both mscorlib.dll and FSharp.Core.dll we can create TcGlobals
             let tcGlobals =
                 TcGlobals(
-                    tcConfig.compilingFSharpCore,
+                    tcConfig.compilingCoreLibrary,
                     ilGlobals,
                     fslibCcu,
                     tcConfig.implicitIncludeDir,

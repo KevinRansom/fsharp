@@ -49,6 +49,10 @@ module internal FSharpEnvironment =
 
     val getFSharpCoreLibraryName: string
 
+    val getfscorlibLibraryName: string
+
+    val getFSharpCoreLibraryName: string
+
     val getFsiLibraryName: string
 
     val isWindows: bool
