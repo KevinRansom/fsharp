@@ -1329,8 +1329,9 @@ let MakeValsForEqualsAugmentation g (tcref: TyconRef) =
         mkValSpec g tcref ty vis (Some(mkEqualsSlotSig g)) "Equals" (tps +-> (mkEqualsObjTy g ty)) unaryArg false
 
     let nocEqualsVal =
-        mkValSpec
+        mkImpliedValSpec
             g
+            m
             tcref
             ty
             vis

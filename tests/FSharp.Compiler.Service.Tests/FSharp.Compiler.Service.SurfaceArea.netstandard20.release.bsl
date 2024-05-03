@@ -51,6 +51,7 @@ FSharp.Compiler.AbstractIL.IL+ILArgConvention: Int32 Tag
 FSharp.Compiler.AbstractIL.IL+ILArgConvention: Int32 get_Tag()
 FSharp.Compiler.AbstractIL.IL+ILArgConvention: System.String ToString()
 FSharp.Compiler.AbstractIL.IL+ILArrayShape: Boolean Equals(ILArrayShape)
+FSharp.Compiler.AbstractIL.IL+ILArrayShape: Boolean Equals(ILArrayShape, System.Collections.IEqualityComparer)
 FSharp.Compiler.AbstractIL.IL+ILArrayShape: Boolean Equals(System.Object)
 FSharp.Compiler.AbstractIL.IL+ILArrayShape: Boolean Equals(System.Object, System.Collections.IEqualityComparer)
 FSharp.Compiler.AbstractIL.IL+ILArrayShape: ILArrayShape FromRank(Int32)

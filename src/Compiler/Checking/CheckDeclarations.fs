@@ -855,6 +855,49 @@ module AddAugmentationDeclarations =
     let AddGenericHashAndComparisonBindings cenv tycon =
         AddGenericCompareBindings cenv tycon @ AddGenericCompareWithComparerBindings cenv tycon @ AddGenericEqualityWithComparerBindings cenv tycon
 
+    //// We can only add the Equals override after we've done the augmentation because we have to wait until 
+    //// tycon.HasOverride can give correct results 
+    //let AddGenericEqualityVals (cenv: cenv) (env: TcEnv) tycon =
+    //    let g = cenv.g
+    //    let tcref = mkLocalTyconRef tycon
+    //    let ty = if tcref.Deref.IsFSharpException then g.exn_ty else generalizedTyconRef g tcref
+    //    let m = tycon.Range
+
+    //    // Note: tycon.HasOverride only gives correct results after we've done the type augmentation 
+    //    let hasExplicitObjectEqualsOverride = tycon.HasOverride g "Equals" [g.obj_ty]
+
+    //    // Note: only provide the equals method if Equals is not implemented explicitly, and
+    //    // we're actually generating Hash/Equals for this type
+    //    if not hasExplicitObjectEqualsOverride &&
+    //        Option.isSome tycon.GeneratedHashAndEqualsWithComparerValues then
+    //            let vspec1, vspec2 = AugmentTypeDefinitions.MakeValsForEqualsAugmentation g tcref
+    //            if not tycon.IsFSharpException then
+    //                PublishInterface cenv env.DisplayEnv tcref m true (mkAppTy g.system_GenericIEquatable_tcref [ty])
+    //            PublishValueDefn cenv env ModuleOrMemberBinding vspec1
+    //            PublishValueDefn cenv env ModuleOrMemberBinding vspec2
+    //            [vspec1; vspec2]
+    //    else []
+
+    //// We can only add the Equals override after we've done the augmentation because we have to wait until 
+    //// tycon.HasOverride can give correct results 
+    //let AddGenericEqualityBindings (cenv: cenv) (env: TcEnv) tycon =
+    //    let g = cenv.g
+    //    if AugmentTypeDefinitions.TyconIsCandidateForAugmentationWithEquals g tycon then 
+    //        let tcaug = tycon.TypeContents
+
+    //        // Note: tycon.HasOverride only gives correct results after we've done the type augmentation 
+    //        let hasExplicitGenericIEquatable = tcaugHasNominalInterface g tcaug g.system_GenericIEquatable_tcref
+    //        if hasExplicitGenericIEquatable then errorR(Error(FSComp.SR.tcImplementsIEquatableExplicitly(tycon.DisplayName), tycon.Range)) 
+
+    //        match AddGenericEqualityVals cenv env tycon with
+    //        | [] -> []
+    //        | [vspec1; vspec2] ->
+    //            tcaug.SetEquals (mkLocalValRef vspec1, mkLocalValRef vspec2)
+    //            AugmentTypeDefinitions.MakeBindingsForEqualsAugmentation g tycon
+    //        | _ -> failwith "Unexpected result - AddGenericEqualityVals - only two values expected or none expected"
+
+    //    else []
+
     // We can only add the Equals override after we've done the augmentation because we have to wait until 
     // tycon.HasOverride can give correct results 
     let AddGenericEqualityBindings (cenv: cenv) (env: TcEnv) tycon =
@@ -4761,6 +4804,8 @@ module TcDeclarations =
                 if tycon.IsUnionTycon && AddAugmentationDeclarations.ShouldAugmentUnion cenv.g tycon then
                     let vspecs = AddAugmentationDeclarations.AddUnionAugmentationValues cenv envForDecls tycon
                     vals <- vspecs @ vals
+                //let vspecs = AddAugmentationDeclarations.AddGenericEqualityVals cenv envForDecls tycon
+                //vals <- vspecs @ vals
             | _ -> ())
 
         // By now we've established the full contents of type definitions apart from their
