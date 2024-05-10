@@ -907,7 +907,11 @@ module internal PrintfImpl =
                 (leftJustify spec.IsGFormat prefix padChar)
                 (rightJustify prefix padChar)
 
+    let private AllStatics = BindingFlags.Public ||| BindingFlags.NonPublic ||| BindingFlags.Static
+
     type ObjectPrinter = 
+
+        static let mi_GenericToStringImpl = lazy typeof<ObjectPrinter>.GetMethod("GenericToStringImpl", AllStatics)
 
         static member ObjectToString(spec: FormatSpecifier) : ValueConverter = 
             Basic.withPadding spec (fun (v: obj) ->
@@ -936,7 +940,7 @@ module internal PrintfImpl =
                 | _ -> v.GetType()
             Microsoft.FSharp.Text.StructuredPrintfImpl.Display.anyToStringForPrintf opts bindingFlags (v, vty)
 
-        static member GenericToString<'T>(spec: FormatSpecifier) : ValueConverter = 
+        static member GenericToStringImpl<'T>(spec: FormatSpecifier) : ValueConverter = 
             let bindingFlags = 
                 if isPlusForPositives spec.Flags then BindingFlags.Public ||| BindingFlags.NonPublic
                 else BindingFlags.Public 
@@ -976,14 +980,14 @@ module internal PrintfImpl =
                 ValueConverter.Make (fun (vobj: obj) ->
                     let v = unbox<'T> vobj
                     ObjectPrinter.GenericToStringCore(v, opts, bindingFlags))
-        
+
+        static member GenericToString(ty:Type, spec: FormatSpecifier) : ValueConverter =
+            let mi = mi_GenericToStringImpl.Value.MakeGenericMethod ty
+            mi.Invoke(null, [| box spec |]) |> unbox
+
     let basicFloatToString spec = 
         let defaultFormat = getFormatForFloat spec.TypeChar DefaultPrecision
         FloatAndDecimal.withPadding spec (getFormatForFloat spec.TypeChar) defaultFormat
-
-    let private AllStatics = BindingFlags.Public ||| BindingFlags.NonPublic ||| BindingFlags.Static
-
-    let mi_GenericToString = typeof<ObjectPrinter>.GetMethod("GenericToString", AllStatics)
 
     let private getValueConverter (ty: Type) (spec: FormatSpecifier) : ValueConverter = 
         match spec.TypeChar with
@@ -1002,8 +1006,7 @@ module internal PrintfImpl =
         | 'g' | 'G' -> 
             basicFloatToString spec
         | 'A' ->
-            let mi = mi_GenericToString.MakeGenericMethod ty
-            mi.Invoke(null, [| box spec |]) |> unbox
+            ObjectPrinter.GenericToString(ty, spec) 
         | 'O' -> 
             ObjectPrinter.ObjectToString(spec) 
         | 'P' -> 
@@ -1159,9 +1162,8 @@ module internal PrintfImpl =
                 // are provided via CaptureTypes and are only known on second phase.
                 match argTys with
                 | null when spec.TypeChar = 'A' ->
-                    let convFunc arg argTy = 
-                        let mi = mi_GenericToString.MakeGenericMethod [| argTy |]
-                        let f = mi.Invoke(null, [| box spec |]) :?> ValueConverter
+                    let convFunc arg ty = 
+                        let f = ObjectPrinter.GenericToString(ty, spec) 
                         let f2 = f.FuncObj :?> (obj -> string)
                         f2 arg
 

@@ -281,11 +281,13 @@ let testing1 () =
     let _ = test "wekoqf3j3" (lazy(sprintf "%g" 1.01f)) "1.01"
 
 
+#if !Disable_PercentA_Tests
     let _ = test "weioj3Q" (lazy(sprintf "%a" (fun () -> string) 10)) "10"
     let _ = test "weioj3W" (lazy(sprintf "%a%a" (fun () s -> s+s) "a" (fun () s -> s+s) "b")) "aabb"
     (* NEG: let _ = test "weioj3" (lazy(sprintf "%a" (fun () -> string_of_int) "a")) "10" *)
 
     let _ = test "weioj3ff" (lazy(try failwithf "%a%a" (fun () s -> s+s) "a" (fun () s -> s+s) "b" with Failure s -> s)) "aabb"
+#endif
     let _ = test "weioj3ffdd" (lazy(string (try if true then failwithf "%s" "abc" else 1 with Failure "abc" -> 2))) "2"
     let _ = test "weioj3ffd2" (lazy(try if true then failwithf "%s" "abc" else "d"with Failure "abc" -> "e")) "e"
 
@@ -8686,6 +8688,7 @@ let func8000()=
     test "test8358" (lazy(sprintf "%-5O" System.IO.FileShare.None)) "None "
     test "test8359" (lazy(sprintf "%-1O" System.IO.FileShare.None)) "None"
     test "test8360" (lazy(sprintf "%-*O" 7 System.IO.FileShare.None)) "None   "
+#if !Disable_PercentA_Tests
     test "test8361" (lazy(sprintf "%A" "abc")) "\"abc\""
     test "test8362" (lazy(sprintf "%5A" "abc")) "\"abc\""
     test "test8363" (lazy(sprintf "%1A" "abc")) "\"abc\""
@@ -8901,6 +8904,7 @@ let func8000()=
     test "test8573" (lazy(sprintf "A%aB%aC%aD%aE%aF%aG%aH%aI%aJ%aK%aL%aM%aN%aO%aP%aQ%aR%aS" (fun _ v -> string v) 0 (fun _ v -> string v) 1 (fun _ v -> string v) 2 (fun _ v -> string v) 3 (fun _ v -> string v) 4 (fun _ v -> string v) 5 (fun _ v -> string v) 6 (fun _ v -> string v) 7 (fun _ v -> string v) 8 (fun _ v -> string v) 9 (fun _ v -> string v) 10 (fun _ v -> string v) 11 (fun _ v -> string v) 12 (fun _ v -> string v) 13 (fun _ v -> string v) 14 (fun _ v -> string v) 15 (fun _ v -> string v) 16 (fun _ v -> string v) 17)) "A0B1C2D3E4F5G6H7I8J9K10L11M12N13O14P15Q16R17S"
     test "test8574" (lazy(sprintf "A%aB%aC%aD%aE%aF%aG%aH%aI%aJ%aK%aL%aM%aN%aO%aP%aQ%aR%aS%aT" (fun _ v -> string v) 0 (fun _ v -> string v) 1 (fun _ v -> string v) 2 (fun _ v -> string v) 3 (fun _ v -> string v) 4 (fun _ v -> string v) 5 (fun _ v -> string v) 6 (fun _ v -> string v) 7 (fun _ v -> string v) 8 (fun _ v -> string v) 9 (fun _ v -> string v) 10 (fun _ v -> string v) 11 (fun _ v -> string v) 12 (fun _ v -> string v) 13 (fun _ v -> string v) 14 (fun _ v -> string v) 15 (fun _ v -> string v) 16 (fun _ v -> string v) 17 (fun _ v -> string v) 18)) "A0B1C2D3E4F5G6H7I8J9K10L11M12N13O14P15Q16R17S18T"
     test "test8575" (lazy(sprintf "A%aB%aC%aD%aE%aF%aG%aH%aI%aJ%aK%aL%aM%aN%aO%aP%aQ%aR%aS%aT%aU" (fun _ v -> string v) 0 (fun _ v -> string v) 1 (fun _ v -> string v) 2 (fun _ v -> string v) 3 (fun _ v -> string v) 4 (fun _ v -> string v) 5 (fun _ v -> string v) 6 (fun _ v -> string v) 7 (fun _ v -> string v) 8 (fun _ v -> string v) 9 (fun _ v -> string v) 10 (fun _ v -> string v) 11 (fun _ v -> string v) 12 (fun _ v -> string v) 13 (fun _ v -> string v) 14 (fun _ v -> string v) 15 (fun _ v -> string v) 16 (fun _ v -> string v) 17 (fun _ v -> string v) 18 (fun _ v -> string v) 19)) "A0B1C2D3E4F5G6H7I8J9K10L11M12N13O14P15Q16R17S18T19U"
+#endif
     test "test8576" (lazy(sprintf "01-00%d01-01%a11-10%d11-11" 0  (fun _ v -> (string v) + "X") 1  10 )) "01-00001-011X11-101011-11"
     test "test8577" (lazy(sprintf "01-00%d01-01%a11-10%d11-11%a_TAIL" 0  (fun _ v -> (string v) + "X") 1  10 (fun _ v -> (string v) + "X") System.IO.FileShare.Read  )) "01-00001-011X11-101011-11ReadX_TAIL"
     test "test8578" (lazy(sprintf "01-00%d01-01%d01-02%a11-10%d11-11%d11-12" 0 1  (fun _ v -> (string v) + "X") 1  10 11 )) "01-00001-01101-021X11-101011-111111-12"
@@ -9133,6 +9137,7 @@ module PercentAPublicTests =
         testTupleTypes ()
         testCollectionsTypes ()
 
+#if !Disable_PercentA_Tests
 module PercentAInternalTests =
     type internal MyInternalRecord =
         {
@@ -9364,7 +9369,7 @@ module NonStructuralComparisonOverTimeSpanDirect =
     do check "test9406" (NonStructuralComparison.hash 11) (Operators.hash 11)
     do check "test9407" (NonStructuralComparison.hash 11L) (Operators.hash 11L)
     do check "test9408" (NonStructuralComparison.hash 11UL) (Operators.hash 11UL)
-
+#endif
 
 [<EntryPoint>]
 let main _ =
@@ -9381,11 +9386,12 @@ let main _ =
     func7000()
     func8000()
 
+#if !Disable_PercentA_Tests
     PresenceOfReflectionApi.tests ()
     PercentAPublicTests.tests ()
     PercentAInternalTests.tests ()
     ClassWithEvents.testWithEventClass ()
-
+#endif
     match !failures with 
     | [] -> 
         stdout.WriteLine "All tests passed"
