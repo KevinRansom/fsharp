@@ -992,6 +992,20 @@ let (|ParsedHashDirectiveArguments|) (input: ParsedHashDirectiveArgument list) =
         | ParsedHashDirectiveArgument.LongIdent(id, _) -> System.String.Join(".", id.LongIdent |> List.map (fun ident -> ident.ToString())))
         input
 
+let (|ParsedHashDirectiveStringArguments|) (input: ParsedHashDirectiveArgument list) =
+    List.map
+        (function
+        | ParsedHashDirectiveArgument.String(s, _, _) -> s
+        | ParsedHashDirectiveArgument.Int32(n, _) -> errorR (Error(FSComp.SR.tcDotLambdaAtNotSupportedExpression (), expr.Range))
+        | ParsedHashDirectiveArgument.SourceIdentifier(_, v, _) -> v
+        | ParsedHashDirectiveArgument.Ident(ident, _) -> errorR (Error(FSComp.SR.tcDotLambdaAtNotSupportedExpression (), expr.Range))
+        | ParsedHashDirectiveArgument.LongIdent(id, _) -> errorR (Error(FSComp.SR.tcDotLambdaAtNotSupportedExpression (), expr.Range)))
+        input
+
+featureParsedHashDirectiveUnexpectedInteger,"Unexpected integer literal '%s'."
+featureParsedHashDirectiveUnexpectedIdentifier,"Unexpected identifier '%s'."
+
+
 let prependIdentInLongIdentWithTrivia (SynIdent(ident, identTrivia)) mDot lid =
     match lid with
     | SynLongIdent(lid, dots, trivia) -> SynLongIdent(ident :: lid, mDot :: dots, identTrivia :: trivia)
