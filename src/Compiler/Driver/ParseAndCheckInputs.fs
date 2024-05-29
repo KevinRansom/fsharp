@@ -934,11 +934,11 @@ let ProcessMetaCommandsFromInput
                 | [ path ] -> ProcessDependencyManagerDirective Directive.Include [ path ] m state
                 | _ -> state
 
-            | ParsedHashDirective("load", [ path ], m) ->
+            | ParsedHashDirective("load", paths, m) ->
                 if not canHaveScriptMetaCommands then
                     errorR (HashDirectiveNotAllowedInNonScript m)
 
-                let arguments = parsedHashDirectiveArguments [ path ] tcConfig.langVersion
+                let arguments = parsedHashDirectiveArguments paths tcConfig.langVersion
 
                 match arguments with
                 | _ :: _ ->

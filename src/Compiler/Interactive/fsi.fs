@@ -3727,8 +3727,8 @@ type FsiInteractionProcessor
     /// Partially process a hash directive, leaving state in packageManagerLines and required assemblies
     let PartiallyProcessHashDirective (ctok, istate, hash, diagnosticsLogger: DiagnosticsLogger) =
         match hash with
-        | ParsedHashDirective("load", [ path ], m) ->
-            let sourceFiles = parsedHashDirectiveArguments [ path ] tcConfigB.langVersion
+        | ParsedHashDirective("load", paths, m) ->
+            let sourceFiles = parsedHashDirectiveArguments paths tcConfigB.langVersion
 
             let istate =
                 fsiDynamicCompiler.EvalSourceFiles(ctok, istate, m, sourceFiles, lexResourceManager, diagnosticsLogger)
