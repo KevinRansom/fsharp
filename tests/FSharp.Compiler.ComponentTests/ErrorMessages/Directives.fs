@@ -4,7 +4,7 @@ namespace ErrorMessages
 open Xunit
 open FSharp.Test.Compiler
 
-module NoWarn =
+module HashDirectives =
 
     // #nowarn is super forgiving the only real error is FS alerts you that you forgot the error ID
     [<Fact>]
@@ -219,7 +219,6 @@ module DoBinding =
         |> shouldSucceed
 
 
-module Time =
     [<Fact>]
     let ``Time Errors F# 8`` () =
 
@@ -258,48 +257,101 @@ printfn "Hello, World"
             (Error 235, Line 2, Col 1, Line 2, Col 10, """Invalid directive. Expected '#time', '#time "on"' or '#time "off"'.""")
             ]
 
-    [<Fact>]
-    let ``Mixed time commands F# 8`` () =
+
+    [<InlineData("8.0")>]
+    [<InlineData("preview")>]
+    [<Theory>]
+    let ``Mixed time commands - Fsc`` (langversion) =
 
         Fsx """
 #time on;;
-#time on;;
-#time off;;
 #time off;;
 #time;;
 #time "on";;
-#time "on";;
 #time "off";;
-#time "off";;
+
 printfn "Hello, World"
         """
-        |> withLangVersion80
+        |> withLangVersion langversion
         |> asExe
         |> compile
         |> shouldFail
         |> withDiagnostics [
-            (Error 3350, Line 2, Col 7, Line 2, Col 9, "Feature '# directives with non-quoted string arguments' is not available in F# 8.0. Please use language version 'PREVIEW' or greater.")
-            (Error 3350, Line 3, Col 7, Line 3, Col 9, "Feature '# directives with non-quoted string arguments' is not available in F# 8.0. Please use language version 'PREVIEW' or greater.")
-            (Error 3350, Line 4, Col 7, Line 4, Col 10, "Feature '# directives with non-quoted string arguments' is not available in F# 8.0. Please use language version 'PREVIEW' or greater.")
-            (Error 3350, Line 5, Col 7, Line 5, Col 10, "Feature '# directives with non-quoted string arguments' is not available in F# 8.0. Please use language version 'PREVIEW' or greater.")
             ]
 
-    [<Fact>]
-    let ``Mixed time commands F# 9`` () =
+
+    [<InlineData("8.0")>]
+    [<InlineData("preview")>]
+    [<Theory>]
+    let ``Mixed time commands - Fsx`` (langversion) =
 
         Fsx """
 #time on;;
-#time on;;
 #time off;;
-#time off;;
+#time blah;;
 #time;;
 #time "on";;
-#time "on";;
 #time "off";;
-#time "off";;
+#time "blah";;
+
 printfn "Hello, World"
         """
-        |> withLangVersionPreview
+        |> withLangVersion langversion
         |> asExe
         |> compile
-        |> shouldSucceed
+        |> shouldFail
+        |> withDiagnostics [
+            ]
+
+
+    [<InlineData("8.0")>]
+    [<InlineData("preview")>]
+    [<Theory>]
+    let ``Reference Errors - Fsc`` (langVersion) =
+
+        FSharp """
+        #r;;
+        #r "";;
+        #r Ident;;
+        #r Long.Ident;;
+        #r 123;;
+
+        printfn "Hello, World"
+        """
+        |> withLangVersion langVersion
+        |> asExe
+        |> compile
+        |> shouldFail
+        |> withDiagnostics[
+            (Error 76, Line 2, Col 9, Line 2, Col 11, "This directive may only be used in F# script files (extensions .fsx or .fsscript). Either remove the directive, move this code to a script file or delimit the directive with '#if INTERACTIVE'/'#endif'.")
+            (Error 76, Line 3, Col 9, Line 3, Col 14, "This directive may only be used in F# script files (extensions .fsx or .fsscript). Either remove the directive, move this code to a script file or delimit the directive with '#if INTERACTIVE'/'#endif'.")
+            (Error 76, Line 4, Col 9, Line 4, Col 17, "This directive may only be used in F# script files (extensions .fsx or .fsscript). Either remove the directive, move this code to a script file or delimit the directive with '#if INTERACTIVE'/'#endif'.")
+            (Error 76, Line 5, Col 9, Line 5, Col 22, "This directive may only be used in F# script files (extensions .fsx or .fsscript). Either remove the directive, move this code to a script file or delimit the directive with '#if INTERACTIVE'/'#endif'.")
+            (Error 76, Line 6, Col 9, Line 6, Col 15, "This directive may only be used in F# script files (extensions .fsx or .fsscript). Either remove the directive, move this code to a script file or delimit the directive with '#if INTERACTIVE'/'#endif'.")
+            ]
+
+
+    [<InlineData("8.0")>]
+    [<InlineData("preview")>]
+    [<Theory>]
+    let ``Reference Errors - Fsi`` (langVersion) =
+
+        Fsx """
+        #r;;
+        #r "";;
+        #r Ident;;
+        #r Long.Ident;;
+        #r 123;;
+
+        printfn "Hello, World"
+        """
+        |> withLangVersion langVersion
+        |> asExe
+        |> compile
+        |> shouldFail
+        |> withDiagnostics[
+            (Warning 213, Line 3, Col 9, Line 3, Col 14, "'' is not a valid assembly name")
+            (Error 3869, Line 4, Col 12, Line 4, Col 17, "Unexpected identifier 'Ident'.")
+            (Error 3869, Line 5, Col 12, Line 5, Col 22, "Unexpected identifier 'Long.Ident'.")
+            (Error 3869, Line 6, Col 12, Line 6, Col 15, "Unexpected integer literal '123'.")
+            ]

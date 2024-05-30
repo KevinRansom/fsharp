@@ -916,17 +916,29 @@ let ProcessMetaCommandsFromInput
                 let arguments = parsedHashDirectiveArguments hashArguments tcConfig.langVersion
                 List.fold (fun state d -> nowarnF state (m, d)) state arguments
 
+            | ParsedHashDirective(("reference" | "r"), [], m) ->
+                if not canHaveScriptMetaCommands then
+                    errorR (HashDirectiveNotAllowedInNonScript m)
+                state
+
             | ParsedHashDirective(("reference" | "r"), [ reference ], m) ->
-                matchedm <- m
+                if not canHaveScriptMetaCommands then
+                    errorR (HashDirectiveNotAllowedInNonScript m)
+                    state
+                else
+                    matchedm <- m
 
-                let arguments =
-                    parsedHashDirectiveStringArguments [ reference ] tcConfig.langVersion
+                    let arguments =
+                        parsedHashDirectiveStringArguments [ reference ] tcConfig.langVersion
 
-                match arguments with
-                | [ reference ] -> ProcessDependencyManagerDirective Directive.Resolution [ reference ] m state
-                | _ -> state
+                    match arguments with
+                    | [ reference ] -> ProcessDependencyManagerDirective Directive.Resolution [ reference ] m state
+                    | _ -> state
 
             | ParsedHashDirective("i", [ path ], m) ->
+                if not canHaveScriptMetaCommands then
+                    errorR (HashDirectiveNotAllowedInNonScript m)
+
                 matchedm <- m
                 let arguments = parsedHashDirectiveStringArguments [ path ] tcConfig.langVersion
 
@@ -948,11 +960,11 @@ let ProcessMetaCommandsFromInput
 
                 state
 
-            | ParsedHashDirective("time", [ switch ], m) ->
+            | ParsedHashDirective("time", switch, m) ->
                 if not canHaveScriptMetaCommands then
                     errorR (HashDirectiveNotAllowedInNonScript m)
 
-                let arguments = parsedHashDirectiveArguments [ switch ] tcConfig.langVersion
+                let arguments = parsedHashDirectiveArguments switch tcConfig.langVersion
 
                 match arguments with
                 | [] -> ()
@@ -961,10 +973,11 @@ let ProcessMetaCommandsFromInput
 
                 state
 
-            | _ ->
-
-                (* warning(Error("This meta-command has been ignored", m)) *)
+            | ParsedHashDirective(c, hashArguments, m) ->
+                let arg = (parsedHashDirectiveArguments hashArguments tcConfig.langVersion)
+                warning (Error((FSComp.SR.fsiInvalidDirective (c, String.concat " " arg)), m))
                 state
+
         with RecoverableException e ->
             errorRecovery e matchedm
             state
