@@ -37,4 +37,14 @@
     </KnownCrossgen2Pack>
   </ItemGroup>
 
+  <!--  Generate the contents of the productversion assembly attribute  -->
+  <Target Name="GenerateFSharpInformationalVersion"
+          BeforeTargets="PrepareForBuild"
+          DependsOnTargets="InitializeSourceControlInformation">
+
+    <PropertyGroup Condition="'$(SourceRevisionId)' != ''">
+      <InformationalVersion>$(FSCorePackageVersionValue).$(SourceRevisionId)</InformationalVersion>
+    </PropertyGroup>
+  </Target>
+
 </Project>
