@@ -110,6 +110,7 @@
     <Compile Include="Conformance\PatternMatching\TypeConstraint\TypeConstraint.fs" />
     <Compile Include="Conformance\PatternMatching\Union\Union.fs" />
     <Compile Include="Conformance\PatternMatching\Wildcard\Wildcard.fs" />
+    <Compile Include="Conformance\Printing\PercentAGeneration.fs" />
     <Compile Include="Conformance\Printing\Printing.fs" />
     <Compile Include="Conformance\PseudoCustomAttributes\PseudoCustomAttributes.fs" />
     <Compile Include="Conformance\Types\RecordTypes\AnonymousRecords.fs" />
