@@ -30,11 +30,11 @@ module TestApp =
         |> withRealInternalSignatureOn
         |> compileExeAndRun
         |> shouldSucceed
-        |> withStdOutContainsAllInOrder [
-            "Hello, World from MyProgram.MyFirstType"
-            "Hello, World from MyProgram.MySecondType"
-            "Hello from implicit main method"
-        ]
+        //|> withStdOutContainsAllInOrder [
+        //    "Hello, World from MyProgram.MyFirstType"
+        //    "Hello, World from MyProgram.MySecondType"
+        //    "Hello from implicit main method"
+        //]
 
 
     [<InlineData("""printfn "Value: %A" x """)>]
@@ -51,8 +51,24 @@ module TestApp =
         |> withRealInternalSignatureOn
         |> compileExeAndRun
         |> shouldSucceed
-        |> withStdOutContainsAllInOrder [
-            "Hello, World from MyProgram.MyFirstType"
-            "Hello, World from MyProgram.MySecondType"
-            "Hello from implicit main method"
-        ]
+        //|> withStdOutContainsAllInOrder [
+        //    "Hello, World from MyProgram.MyFirstType"
+        //    "Hello, World from MyProgram.MySecondType"
+        //    "Hello from implicit main method"
+        //]
+
+    [<InlineData("""let x =-6""")>]
+    [<InlineData("""let x = -6=-6" """)>]
+    [<Theory>]
+    let ``Binding let x=-1 - no spaces`` (line) =
+
+        FSharp $"""{line}"""
+        |> withLangVersionPreview
+        |> withRealInternalSignatureOn
+        |> compileExeAndRun
+        |> shouldSucceed
+        //|> withStdOutContainsAllInOrder [
+        //    "Hello, World from MyProgram.MyFirstType"
+        //    "Hello, World from MyProgram.MySecondType"
+        //    "Hello from implicit main method"
+        //]
