@@ -57,10 +57,11 @@ module TestApp =
         //    "Hello from implicit main method"
         //]
 
+    [<InlineData("""let x = -6L""")>]
     [<InlineData("""let x =-6""")>]
-    [<InlineData("""let x = -6=-6" """)>]
+    [<InlineData("""let x = -6=-6 """)>]
     [<Theory>]
-    let ``Binding let x=-1 - no spaces`` (line) =
+    let ``= followed by -`` (line) =
 
         FSharp $"""{line}"""
         |> withLangVersionPreview

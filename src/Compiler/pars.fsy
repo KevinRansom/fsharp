@@ -3329,7 +3329,8 @@ rawConstant:
     { SynConst.UInt32 $1 }
 
   | INT64
-    { if snd $1 then errorR(Error(FSComp.SR.lexOutsideSixtyFourBitSigned(), lhs parseState))
+    { printfn "| INT64"
+      if snd $1 then errorR(Error(FSComp.SR.lexOutsideSixtyFourBitSigned(), lhs parseState))
       SynConst.Int64 (fst $1) }
 
   | UINT64
