@@ -1860,9 +1860,9 @@ type internal FsiDynamicCompiler
         let assemblyBytes, pdbBytes = WriteILBinaryInMemory(opts, ilxMainModule, id)
 
         let asm =
-            match opts.pdbfile, pdbBytes with
-            | (Some pdbfile), (Some pdbBytes) -> File.WriteAllBytes(pdbfile, pdbBytes)
-            | _ -> ()
+            //match opts.pdbfile, pdbBytes with
+            //| (Some pdbfile), (Some pdbBytes) -> File.WriteAllBytes(pdbfile, pdbBytes)
+            //| _ -> ()
 
             match pdbBytes with
             | None -> Assembly.Load(assemblyBytes)

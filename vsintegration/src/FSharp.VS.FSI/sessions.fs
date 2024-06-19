@@ -382,10 +382,10 @@ type FsiSession(sourceFile) =
                 | ".NET", _ when arr.Length >= 2 -> getTfmNumber arr[1]
                 | _ -> Single.MaxValue
 
-            // When using .NET Core, allow up to 2 seconds to allow detection of process ID
+            // When using .NET Core, allow up to 5 seconds to allow detection of process ID
             // of inner process to complete on startup.  The only scenario where we ask for the process ID immediately after
             // process startup is when the user clicks "Start Debugging" before the process has started.
-            for i in 0..10 do
+            for i in 0..50 do
                 if SessionsProperties.fsiUseNetCore && trueProcessPid.IsNone then
                     if File.Exists(trueProcessIdFile) then
                         let lines = File.ReadAllLines trueProcessIdFile
@@ -402,7 +402,7 @@ type FsiSession(sourceFile) =
 
                         File.Delete(trueProcessIdFile)
                     else
-                        System.Threading.Thread.Sleep(200)
+                        System.Threading.Thread.Sleep(100)
             trueProcessPid, trueFrameworkVersion
 
     // Create session object 
@@ -424,6 +424,7 @@ type FsiSession(sourceFile) =
     member _.SupportsInterrupt = not cmdProcess.HasExited
 
     member _.ProcessID =
+        System.Threading.Thread.Sleep(3000)
         match splitPidFile.Force() with 
         | None, _ -> cmdProcessPid
         | Some pid, _ -> pid
