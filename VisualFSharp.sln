@@ -193,6 +193,8 @@ Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "MicroPerf", "tests\benchmar
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "MicroPerfCSharp", "tests\benchmarks\CompiledCodeBenchmarks\MicroPerf\CS\MicroPerfCSharp.csproj", "{9F9DD315-37DA-4413-928E-1CFC6924B64F}"
 EndProject
+Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "fscorlib", "src\fscorlib\fscorlib.fsproj", "{CC20A00F-13CE-4F3F-94A6-4B556CF5C939}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -1019,6 +1021,18 @@ Global
 		{9F9DD315-37DA-4413-928E-1CFC6924B64F}.Release|Any CPU.Build.0 = Release|Any CPU
 		{9F9DD315-37DA-4413-928E-1CFC6924B64F}.Release|x86.ActiveCfg = Release|Any CPU
 		{9F9DD315-37DA-4413-928E-1CFC6924B64F}.Release|x86.Build.0 = Release|Any CPU
+		{CC20A00F-13CE-4F3F-94A6-4B556CF5C939}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CC20A00F-13CE-4F3F-94A6-4B556CF5C939}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CC20A00F-13CE-4F3F-94A6-4B556CF5C939}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{CC20A00F-13CE-4F3F-94A6-4B556CF5C939}.Debug|x86.Build.0 = Debug|Any CPU
+		{CC20A00F-13CE-4F3F-94A6-4B556CF5C939}.Proto|Any CPU.ActiveCfg = Proto|Any CPU
+		{CC20A00F-13CE-4F3F-94A6-4B556CF5C939}.Proto|Any CPU.Build.0 = Proto|Any CPU
+		{CC20A00F-13CE-4F3F-94A6-4B556CF5C939}.Proto|x86.ActiveCfg = Proto|Any CPU
+		{CC20A00F-13CE-4F3F-94A6-4B556CF5C939}.Proto|x86.Build.0 = Proto|Any CPU
+		{CC20A00F-13CE-4F3F-94A6-4B556CF5C939}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CC20A00F-13CE-4F3F-94A6-4B556CF5C939}.Release|Any CPU.Build.0 = Release|Any CPU
+		{CC20A00F-13CE-4F3F-94A6-4B556CF5C939}.Release|x86.ActiveCfg = Release|Any CPU
+		{CC20A00F-13CE-4F3F-94A6-4B556CF5C939}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -1099,6 +1113,7 @@ Global
 		{6734FC6F-B5F3-45E1-9A72-720378BB49C9} = {DFB6ADD7-3149-43D9-AFA0-FC4A818B472B}
 		{601CD5C1-EAFA-4AE3-8FB9-F667B5728213} = {DFB6ADD7-3149-43D9-AFA0-FC4A818B472B}
 		{9F9DD315-37DA-4413-928E-1CFC6924B64F} = {DFB6ADD7-3149-43D9-AFA0-FC4A818B472B}
+		{CC20A00F-13CE-4F3F-94A6-4B556CF5C939} = {3058BC79-8E79-4645-B05D-48CC182FA8A6}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {48EDBBBE-C8EE-4E3C-8B19-97184A487B37}
