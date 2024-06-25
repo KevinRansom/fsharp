@@ -2399,7 +2399,7 @@ type FSharpParsingOptions =
         IsInteractive: bool
         IndentationAwareSyntax: bool option
         StrictIndentation: bool option
-        CompilingFSharpCore: bool
+        compilingCoreLibrary: bool
         IsExe: bool
     }
 
@@ -2417,7 +2417,7 @@ type FSharpParsingOptions =
             IsInteractive = false
             IndentationAwareSyntax = None
             StrictIndentation = None
-            CompilingFSharpCore = false
+            compilingCoreLibrary = false
             IsExe = false
         }
 
@@ -2431,7 +2431,7 @@ type FSharpParsingOptions =
             IsInteractive = isInteractive
             IndentationAwareSyntax = tcConfig.indentationAwareSyntax
             StrictIndentation = tcConfig.strictIndentation
-            CompilingFSharpCore = tcConfig.compilingFSharpCore
+            compilingCoreLibrary = tcConfig.compilingCoreLibrary
             IsExe = tcConfig.target.IsExe
         }
 
@@ -2445,7 +2445,7 @@ type FSharpParsingOptions =
             IsInteractive = isInteractive
             IndentationAwareSyntax = tcConfigB.indentationAwareSyntax
             StrictIndentation = tcConfigB.strictIndentation
-            CompilingFSharpCore = tcConfigB.compilingFSharpCore
+            compilingCoreLibrary = tcConfigB.compilingCoreLibrary
             IsExe = tcConfigB.target.IsExe
         }
 
@@ -2584,7 +2584,7 @@ module internal ParseAndCheckFile =
             )
 
         let tokenizer =
-            LexFilter.LexFilter(indentationSyntaxStatus, options.CompilingFSharpCore, Lexer.token lexargs true, lexbuf, false)
+            LexFilter.LexFilter(indentationSyntaxStatus, options.compilingCoreLibrary, Lexer.token lexargs true, lexbuf, false)
 
         if ct.CanBeCanceled then
             (fun _ ->
