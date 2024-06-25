@@ -238,7 +238,7 @@ type TcConfigBuilder =
 
         defaultFSharpBinariesDir: string
 
-        mutable compilingCoreLibrary: bool
+        mutable compilingCoreLibraryName: bool
 
         mutable useIncrementalBuilder: bool
 
@@ -586,6 +586,8 @@ type TcConfig =
     member openDebugInformationForLaterStaticLinking: bool
 
     member fsharpBinariesDir: string
+
+    member compilingfscorlib: bool
 
     member compilingCoreLibrary: bool
 

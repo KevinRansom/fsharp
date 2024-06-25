@@ -647,6 +647,12 @@ let SetUseSdkSwitch (tcConfigB: TcConfigBuilder) switch =
 
 let (++) x s = x @ [ s ]
 
+let setCompilingCoreLibraryName (tcConfigB: TcConfigBuilder) (name: string) =
+    match name.ToLowerInvariant() with
+    | "fsharp.core" -> tcConfigB.compilingCoreLibraryName <- tagCompilingFSharpCore
+    | "fscorlib" -> tcConfigB.compilingCoreLibraryName <- tagCompilingFSCorLib
+    | _ -> error (Error(FSComp.SR.optsUnrecognizedCompilingCoreLib name, rangeCmdArgs))
+
 let SetTarget (tcConfigB: TcConfigBuilder) (s: string) =
     match s.ToLowerInvariant() with
     | "exe" -> tcConfigB.target <- CompilerTarget.ConsoleExe

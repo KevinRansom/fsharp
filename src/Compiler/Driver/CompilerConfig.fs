@@ -1471,6 +1471,13 @@ type TcConfig private (data: TcConfigBuilder, validate: bool) =
     member tcConfig.assumeDotNetFramework =
         tcConfig.primaryAssembly = PrimaryAssembly.Mscorlib
 
+    member tcConfig.compilingfscorlib = tcConfig.compilingCoreLibraryName = "fscorlib"
+
+    member tcConfig.compilingCoreLibrary =
+        tcConfig.compilingCoreLibraryName = "fsharp.core"
+        || tcConfig.compilingCoreLibraryName = "fscorlib"
+
+
 /// Represents a computation to return a TcConfig. Normally this is just a constant immutable TcConfig,
 /// but for F# Interactive it may be based on an underlying mutable TcConfigBuilder.
 type TcConfigProvider =
