@@ -6,6 +6,7 @@ module ExtraTopLevelOperators =
 
     open System
     open System.Collections.Generic
+    open System.ComponentModel
     open System.IO
     open System.Diagnostics
     open Microsoft.FSharp
@@ -280,32 +281,32 @@ module ExtraTopLevelOperators =
     let eprintfn format =
         Printf.eprintfn format
 
-    [<CompiledName("DefaultAsyncBuilder")>]
+    [<CompiledName("DefaultAsyncBuilder"); EditorBrowsableAttribute(EditorBrowsableState.Never)>]
     let async = AsyncBuilder()
 
-    [<CompiledName("ToSingle")>]
+    [<CompiledName("ToSingle"); EditorBrowsableAttribute(EditorBrowsableState.Never)>]
     let inline single value =
         float32 value
 
-    [<CompiledName("ToDouble")>]
+    [<CompiledName("ToDouble"); EditorBrowsableAttribute(EditorBrowsableState.Never)>]
     let inline double value =
         float value
 
-    [<CompiledName("ToByte")>]
+    [<CompiledName("ToByte"); EditorBrowsableAttribute(EditorBrowsableState.Never)>]
     let inline uint8 value =
         byte value
 
-    [<CompiledName("ToSByte")>]
+    [<CompiledName("ToSByte"); EditorBrowsableAttribute(EditorBrowsableState.Never)>]
     let inline int8 value =
         sbyte value
 
     module Checked =
 
-        [<CompiledName("ToByte")>]
+        [<CompiledName("ToByte"); EditorBrowsableAttribute(EditorBrowsableState.Never)>]
         let inline uint8 value =
             Checked.byte value
 
-        [<CompiledName("ToSByte")>]
+        [<CompiledName("ToSByte"); EditorBrowsableAttribute(EditorBrowsableState.Never)>]
         let inline int8 value =
             Checked.sbyte value
 

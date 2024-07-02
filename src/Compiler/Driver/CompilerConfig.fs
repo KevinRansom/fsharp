@@ -122,8 +122,7 @@ let ComputeMakePathAbsolute implicitIncludeDir (path: string) =
     with :? ArgumentException ->
         path
 
-let isCoreLibrary compilingLibraryName =
-    compilingLibraryName = "FSharp.Core"
+let isCoreLibrary compilingLibraryName = compilingLibraryName = "FSharp.Core"
 
 //----------------------------------------------------------------------------
 // Configuration
@@ -1234,7 +1233,10 @@ type TcConfig private (data: TcConfigBuilder, validate: bool) =
     member _.noFeedback = data.noFeedback
     member _.stackReserveSize = data.stackReserveSize
     member _.implicitIncludeDir = data.implicitIncludeDir
-    member _.openDebugInformationForLaterStaticLinking = data.openDebugInformationForLaterStaticLinking
+
+    member _.openDebugInformationForLaterStaticLinking =
+        data.openDebugInformationForLaterStaticLinking
+
     member _.fsharpBinariesDir = data.defaultFSharpBinariesDir
     member _.compilingLibraryName = data.compilingLibraryName
     member _.useIncrementalBuilder = data.useIncrementalBuilder
@@ -1470,7 +1472,8 @@ type TcConfig private (data: TcConfigBuilder, validate: bool) =
 
     member tcConfig.GenerateOptimizationData = tcConfig.GenerateSignatureData
 
-    member tcConfig.assumeDotNetFramework = tcConfig.primaryAssembly = PrimaryAssembly.Mscorlib
+    member tcConfig.assumeDotNetFramework =
+        tcConfig.primaryAssembly = PrimaryAssembly.Mscorlib
 
     member tcConfig.compilingCoreLibrary = isCoreLibrary tcConfig.compilingLibraryName
 

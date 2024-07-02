@@ -9,6 +9,7 @@ namespace Microsoft.FSharp.Core
 [<AutoOpen>]
 module ExtraTopLevelOperators = 
 
+    open System.ComponentModel
     open System.IO
     open Microsoft.FSharp.Core
     open Microsoft.FSharp.Control
@@ -130,7 +131,7 @@ module ExtraTopLevelOperators =
     /// sleepExample() |> Async.RunSynchronously
     /// </code>
     /// </example>
-    [<CompiledName("DefaultAsyncBuilder")>]
+    [<CompiledName("DefaultAsyncBuilder"); EditorBrowsableAttribute(EditorBrowsableState.Never)>]
     val async: AsyncBuilder
 
     /// <summary>Converts the argument to 32-bit float.</summary>
@@ -144,7 +145,7 @@ module ExtraTopLevelOperators =
     /// </code>
     /// Evaluates to <c>45.0f</c>.
     /// </example>
-    [<CompiledName("ToSingle")>]
+    [<CompiledName("ToSingle"); EditorBrowsableAttribute(EditorBrowsableState.Never)>]
     val inline single: value: ^T -> single when ^T : (static member op_Explicit : ^T -> single) and default ^T : int
 
     /// <summary>Converts the argument to 64-bit float.</summary>
@@ -165,7 +166,7 @@ module ExtraTopLevelOperators =
     /// </code>
     /// Evaluates to <c>12.30000019</c>.
     /// </example>
-    [<CompiledName("ToDouble")>]
+    [<CompiledName("ToDouble"); EditorBrowsableAttribute(EditorBrowsableState.Never)>]
     val inline double: value: ^T -> double when ^T : (static member op_Explicit : ^T -> double) and default ^T : int
 
     /// <summary>Converts the argument to byte.</summary>
@@ -178,7 +179,7 @@ module ExtraTopLevelOperators =
     /// </code>
     /// Evaluates to <c>12uy</c>.
     /// </example>
-    [<CompiledName("ToByte")>]
+    [<CompiledName("ToByte"); EditorBrowsableAttribute(EditorBrowsableState.Never)>]
     val inline uint8: value: ^T -> uint8 when ^T : (static member op_Explicit : ^T -> uint8) and default ^T : int        
     
     /// <summary>Converts the argument to signed byte.</summary>
@@ -199,7 +200,7 @@ module ExtraTopLevelOperators =
     /// </code>
     /// Evaluates to <c>3y</c>.
     /// </example>
-    [<CompiledName("ToSByte")>]
+    [<CompiledName("ToSByte"); EditorBrowsableAttribute(EditorBrowsableState.Never)>]
     val inline int8: value: ^T -> int8 when ^T : (static member op_Explicit : ^T -> int8) and default ^T : int
 
     module Checked = 
@@ -221,7 +222,7 @@ module ExtraTopLevelOperators =
         /// </code>
         /// Throws <c>System.OverflowException</c>.
         /// </example>
-        [<CompiledName("ToByte")>]
+        [<CompiledName("ToByte"); EditorBrowsableAttribute(EditorBrowsableState.Never)>]
         val inline uint8: value: ^T -> byte when ^T : (static member op_Explicit : ^T -> uint8) and default ^T : int        
     
         /// <summary>Converts the argument to signed byte.</summary>
@@ -242,7 +243,7 @@ module ExtraTopLevelOperators =
         /// </code>
         /// Throws <c>System.OverflowException</c>.
         /// </example>
-        [<CompiledName("ToSByte")>]
+        [<CompiledName("ToSByte"); EditorBrowsableAttribute(EditorBrowsableState.Never)>]
         val inline int8: value: ^T -> sbyte when ^T : (static member op_Explicit : ^T -> int8) and default ^T : int
 
     /// <summary>Builds a read-only lookup table from a sequence of key/value pairs. The key objects are indexed using generic hashing and equality.</summary>
@@ -339,7 +340,7 @@ module ExtraTopLevelOperators =
     /// </code>
     /// Evaluates to <c>10</c>. The text <c>eval!</c> is printed once on the first invocation of <c>f</c>.
     /// </example>
-    [<CompiledName("LazyPattern")>]
+    [<CompiledName("LazyPattern"); EditorBrowsableAttribute(EditorBrowsableState.Never)>]
     val (|Lazy|): input: Lazy<'T> -> 'T
 
     /// <summary>Builds a query using query syntax and operators.</summary>
