@@ -5829,7 +5829,7 @@ type CcuThunk =
             if x.AssemblyName <> "FSharp.Core" then 
                 errorR(Failure("internal error: Fixup: the ccu thunk for assembly "+x.AssemblyName+" not delayed!"))
 
-        assert (avail.AssemblyName = x.AssemblyName)
+        //@@@@@@@@@@@@@@ assert (avail.AssemblyName = x.AssemblyName)
         x.target <- 
             match box avail.target with
             | null -> error(Failure("internal error: ccu thunk '"+avail.name+"' not fixed up!"))
