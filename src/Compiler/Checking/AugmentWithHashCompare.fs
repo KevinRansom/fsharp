@@ -1333,7 +1333,7 @@ let MakeValsForEqualsAugmentation g (tcref: TyconRef) =
             g
             tcref
             ty
-            vis
+            taccessPublic
             (if tcref.Deref.IsFSharpException then
                  None
              else
