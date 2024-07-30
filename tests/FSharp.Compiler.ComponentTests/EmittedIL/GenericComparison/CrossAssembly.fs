@@ -112,7 +112,7 @@ module Module2 =
     [<InlineData(true)>]        // RealSig
     [<InlineData(false)>]       // Regular
     [<Theory>]
-    let ``Another assembly with private type`` (realsig) =
+    let ``Another assembly with private value`` (realsig) =
         let module1 =
             FSharpWithFileName "Module1.fs"
                 """
@@ -190,7 +190,7 @@ IL_0024:  callvirt   instance bool [module1]Module1/Value::Equals(class [module1
     [<InlineData(true)>]        // RealSig
     [<InlineData(false)>]       // Regular
     [<Theory>]
-    let ``Single Assembly with private type`` (realsig) =
+    let ``Single Assembly with private value`` (realsig) =
 
         let mainModule = 
             FSharpWithFileName "Program.fs"
@@ -247,3 +247,76 @@ module Module2 =
     IL_0025:  callvirt   instance bool Program/Module1/Value::Equals(class Program/Module1/Value,
                                                                      class [runtime]System.Collections.IEqualityComparer)
         """ ]
+
+
+    [<InlineData(true)>]        // RealSig
+    [<InlineData(false)>]       // Regular
+    [<Theory>]
+    let ``private type``(realsig) =
+        let mainModule = 
+            FSharpWithFileName "Program.fs"
+                """
+module internal IPartialEqualityComparer =
+    open System.Collections.Generic
+
+    [<StructuralEquality; NoComparison>]
+    type private WrapType<'T> = Wrap of 'T
+"""
+        mainModule
+        |> asExe
+        |> withNoWarn 988
+        |> withRealInternalSignature realsig
+        |> withOptimize
+        |> compile
+        |> shouldSucceed
+        |> verifyIL [
+            """
+      .method public hidebysig instance bool 
+              Equals(class Program/IPartialEqualityComparer/WrapType`1<!T> obj,
+                     class [runtime]System.Collections.IEqualityComparer comp) cil managed
+      {
+        .custom instance void [runtime]System.Runtime.CompilerServices.CompilerGeneratedAttribute::.ctor() = ( 01 00 00 00 ) 
+        
+        .maxstack  5
+        .locals init (class Program/IPartialEqualityComparer/WrapType`1<!T> V_0,
+                 class Program/IPartialEqualityComparer/WrapType`1<!T> V_1,
+                 !T V_2,
+                 !T V_3)
+        IL_0000:  ldarg.0
+        IL_0001:  brfalse.s  IL_0027
+
+        IL_0003:  ldarg.1
+        IL_0004:  brfalse.s  IL_0025
+
+        IL_0006:  ldarg.0
+        IL_0007:  pop
+        IL_0008:  ldarg.0
+        IL_0009:  stloc.0
+        IL_000a:  ldarg.1
+        IL_000b:  stloc.1
+        IL_000c:  ldloc.0
+        IL_000d:  ldfld      !0 class Program/IPartialEqualityComparer/WrapType`1<!T>::item
+        IL_0012:  stloc.2
+        IL_0013:  ldloc.1
+        IL_0014:  ldfld      !0 class Program/IPartialEqualityComparer/WrapType`1<!T>::item
+        IL_0019:  stloc.3
+        IL_001a:  ldarg.2
+        IL_001b:  ldloc.2
+        IL_001c:  ldloc.3
+        IL_001d:  tail.
+        IL_001f:  call       bool [FSharp.Core]Microsoft.FSharp.Core.LanguagePrimitives/HashCompare::GenericEqualityWithComparerIntrinsic<!T>(class [runtime]System.Collections.IEqualityComparer,
+                                                                                                                                              !!0,
+                                                                                                                                              !!0)
+        IL_0024:  ret
+
+        IL_0025:  ldc.i4.0
+        IL_0026:  ret
+
+        IL_0027:  ldarg.1
+        IL_0028:  ldnull
+        IL_0029:  cgt.un
+        IL_002b:  ldc.i4.0
+        IL_002c:  ceq
+        IL_002e:  ret
+      } 
+            """ ]

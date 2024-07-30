@@ -86,6 +86,7 @@ module GenericComparison =
 
 
 
+
     // SOURCE=Hash01.fsx SCFLAGS="-a -g --optimize+" COMPILE_ONLY=1 POSTCMD="..\\CompareIL.cmd Hash01.dll"          # Hash01.fs -
     [<Theory; Directory(__SOURCE_DIRECTORY__, Includes=[|"Hash01.fsx"|])>]
     let ``Hash01_fsx`` compilation =
