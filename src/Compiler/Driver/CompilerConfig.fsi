@@ -242,6 +242,8 @@ type TcConfigBuilder =
 
         mutable compilingFSharpCore: bool
 
+        mutable allowInlineAssembly: bool
+
         mutable useIncrementalBuilder: bool
 
         mutable includes: string list
@@ -592,6 +594,8 @@ type TcConfig =
     member fsharpBinariesDir: string
 
     member compilingFSharpCore: bool
+
+    member allowInlineAssembly: bool
 
     member useIncrementalBuilder: bool
 

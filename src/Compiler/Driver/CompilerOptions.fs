@@ -1799,6 +1799,15 @@ let compilingFsLib40Flag =
         None
     )
 
+let compilingAllowInlineAssemblyFlag (tcConfigB: TcConfigBuilder) =
+    CompilerOption(
+        "allowInlineAssembly",
+        tagNone,
+        OptionSwitch(fun switch -> tcConfigB.allowInlineAssembly <- switch <> OptionSwitch.Off),
+        Some(InternalCommandLineOption("--allowinlineassembly", rangeCmdArgs)),
+        None
+    )
+
 let compilingFsLibNoBigIntFlag =
     CompilerOption(
         "compiling-fslib-nobigint",
@@ -1912,6 +1921,7 @@ let deprecatedFlagsFsc tcConfigB =
         compilingFsLib20Flag
         compilingFsLib40Flag
         compilingFsLibNoBigIntFlag
+        compilingAllowInlineAssemblyFlag tcConfigB
 
         CompilerOption(
             "version",
