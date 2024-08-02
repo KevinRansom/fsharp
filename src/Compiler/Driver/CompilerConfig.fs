@@ -423,7 +423,7 @@ type TcConfigBuilder =
         mutable openDebugInformationForLaterStaticLinking: bool (* only for --standalone *)
         defaultFSharpBinariesDir: string
         mutable compilingFSharpCore: bool
-        mutable allowInlineAssembly: bool
+        mutable enablelibraryonlyfeatures: bool
         mutable useIncrementalBuilder: bool
         mutable includes: string list
         mutable implicitOpens: string list
@@ -667,7 +667,7 @@ type TcConfigBuilder =
             conditionalDefines = []
             openDebugInformationForLaterStaticLinking = false
             compilingFSharpCore = false
-            allowInlineAssembly = false
+            enablelibraryonlyfeatures = false
             useIncrementalBuilder = false
             implicitOpens = []
             includes = []
@@ -1242,7 +1242,7 @@ type TcConfig private (data: TcConfigBuilder, validate: bool) =
 
     member _.fsharpBinariesDir = data.defaultFSharpBinariesDir
     member _.compilingFSharpCore = data.compilingFSharpCore
-    member _.allowInlineAssembly = data.allowInlineAssembly
+    member _.enablelibraryonlyfeatures = data.enablelibraryonlyfeatures
     member _.useIncrementalBuilder = data.useIncrementalBuilder
     member _.includes = data.includes
     member _.implicitOpens = data.implicitOpens

@@ -242,7 +242,7 @@ type TcConfigBuilder =
 
         mutable compilingFSharpCore: bool
 
-        mutable allowInlineAssembly: bool
+        mutable enablelibraryonlyfeatures: bool
 
         mutable useIncrementalBuilder: bool
 
@@ -595,7 +595,7 @@ type TcConfig =
 
     member compilingFSharpCore: bool
 
-    member allowInlineAssembly: bool
+    member enablelibraryonlyfeatures: bool
 
     member useIncrementalBuilder: bool
 

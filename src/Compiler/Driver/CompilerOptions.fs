@@ -1799,12 +1799,12 @@ let compilingFsLib40Flag =
         None
     )
 
-let compilingAllowInlineAssemblyFlag (tcConfigB: TcConfigBuilder) =
+let enableLibraryOnlyFeatures (tcConfigB: TcConfigBuilder) =
     CompilerOption(
-        "allowInlineAssembly",
+        "enablelibraryonlyfeatures",
         tagNone,
-        OptionSwitch(fun switch -> tcConfigB.allowInlineAssembly <- switch <> OptionSwitch.Off),
-        Some(InternalCommandLineOption("--allowinlineassembly", rangeCmdArgs)),
+        OptionSwitch(fun switch -> tcConfigB.enablelibraryonlyfeatures <- switch <> OptionSwitch.Off),
+        Some(InternalCommandLineOption("--enablelibraryonlyfeatures", rangeCmdArgs)),
         None
     )
 
@@ -1921,7 +1921,7 @@ let deprecatedFlagsFsc tcConfigB =
         compilingFsLib20Flag
         compilingFsLib40Flag
         compilingFsLibNoBigIntFlag
-        compilingAllowInlineAssemblyFlag tcConfigB
+        enableLibraryOnlyFeatures tcConfigB
 
         CompilerOption(
             "version",

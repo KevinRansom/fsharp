@@ -643,7 +643,7 @@ let ParseOneInputLexbuf (tcConfig: TcConfig, lexResourceManager, lexbuf, fileNam
                         LexFilter
                             .LexFilter(
                                 indentationSyntaxStatus,
-                                tcConfig.compilingFSharpCore,
+                                tcConfig.enablelibraryonlyfeatures,
                                 Lexer.token lexargs skipWhitespaceTokens,
                                 lexbuf,
                                 tcConfig.tokenize = TokenizeOption.Debug
@@ -654,7 +654,7 @@ let ParseOneInputLexbuf (tcConfig: TcConfig, lexResourceManager, lexbuf, fileNam
                         LexFilter
                             .LexFilter(
                                 indentationSyntaxStatus,
-                                tcConfig.compilingFSharpCore,
+                                tcConfig.enablelibraryonlyfeatures,
                                 Lexer.token lexargs skipWhitespaceTokens,
                                 lexbuf,
                                 tcConfig.tokenize = TokenizeOption.Debug
