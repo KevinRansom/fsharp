@@ -219,8 +219,11 @@ let rec remapTypeAux (tyenv: Remap) (ty: TType) =
       if domainTy === domainTyR && rangeTy === retTyR then ty else
       TType_fun (domainTyR, retTyR, flags)
 
-  | TType_forall (tps, ty) -> 
-      let tpsR, tyenv = copyAndRemapAndBindTypars tyenv tps
+  | TType_forall (tps, ty) ->
+      let tpsR, tyenv =
+          match tyenv.realsig with
+          | false -> copyAndRemapAndBindTypars tyenv tps
+          | true -> tps, tyenv
       TType_forall (tpsR, remapTypeAux tyenv ty)
 
   | TType_measure unt -> 
@@ -328,16 +331,12 @@ and copyAndRemapAndBindTyparsFull remapAttrib tyenv tps =
     match tps with 
     | [] -> tps, tyenv
     | _ ->
-        match tyenv.realsig with
-        | true ->
-            tps, tyenv
-        | false ->
-            let tpsR = copyTypars false tps
-            let tyenv = { tyenv with tpinst = bindTypars tps (generalizeTypars tpsR) tyenv.tpinst }
-            (tps, tpsR) ||> List.iter2 (fun tporig tp ->
-                 tp.SetConstraints (remapTyparConstraintsAux tyenv tporig.Constraints)
-                 tp.SetAttribs (tporig.Attribs |> remapAttrib))
-            tpsR, tyenv
+        let tpsR = copyTypars false tps
+        let tyenv = { tyenv with tpinst = bindTypars tps (generalizeTypars tpsR) tyenv.tpinst }
+        (tps, tpsR) ||> List.iter2 (fun tporig tp ->
+                tp.SetConstraints (remapTyparConstraintsAux tyenv tporig.Constraints)
+                tp.SetAttribs (tporig.Attribs |> remapAttrib))
+        tpsR, tyenv
 
 // copies bound typars, extends tpinst 
 and copyAndRemapAndBindTypars tyenv tps =
@@ -389,13 +388,16 @@ let remapTypes tyenv x =
 /// We currently break the recursion by passing in remapAttribImpl as a function parameter. 
 /// Use this one for any type that may be a forall type where the type variables may contain attributes 
 let remapTypeFull remapAttrib tyenv ty =
-    if isRemapEmpty tyenv then ty else 
-    match stripTyparEqns ty with
-    | TType_forall(tps, tau) -> 
-        let tpsR, tyenvinner = copyAndRemapAndBindTyparsFull remapAttrib tyenv tps
-        TType_forall(tpsR, remapType tyenvinner tau)
-    | _ -> 
-        remapType tyenv ty
+    if isRemapEmpty tyenv then ty
+    else
+        match tyenv.realsig, stripTyparEqns ty with
+        | false, TType_forall(tps, tau) ->
+            let tpsR, tyenvinner =
+                match tyenv.realsig with
+                | false -> copyAndRemapAndBindTyparsFull remapAttrib tyenv tps
+                | true -> tps, tyenv
+            TType_forall(tpsR, remapType tyenvinner tau)
+        | _-> remapType tyenv ty
 
 let remapParam tyenv (TSlotParam(nm, ty, fl1, fl2, fl3, attribs) as x) = 
     if isRemapEmpty tyenv then x else 
@@ -404,7 +406,11 @@ let remapParam tyenv (TSlotParam(nm, ty, fl1, fl2, fl3, attribs) as x) =
 let remapSlotSig remapAttrib tyenv (TSlotSig(nm, ty, ctps, methTypars, paraml, retTy) as x) =
     if isRemapEmpty tyenv then x else 
     let tyR = remapTypeAux tyenv ty
-    let ctpsR, tyenvinner = copyAndRemapAndBindTyparsFull remapAttrib tyenv ctps
+    let ctpsR, tyenvinner =
+        match tyenv.realsig with
+        | false -> copyAndRemapAndBindTyparsFull remapAttrib tyenv ctps
+        | true -> ctps, tyenv
+
     let methTyparsR, tyenvinner = copyAndRemapAndBindTyparsFull remapAttrib tyenvinner methTypars
     TSlotSig(nm, tyR, ctpsR, methTyparsR, List.mapSquared (remapParam tyenvinner) paraml, Option.map (remapTypeAux tyenvinner) retTy) 
 
@@ -5869,10 +5875,14 @@ let remapAttribKind tmenv k =
     | ILAttrib _ as x -> x
     | FSAttrib vref -> FSAttrib(remapValRef tmenv vref)
 
-let tmenvCopyRemapAndBindTypars remapAttrib tmenv tps = 
-    let tps', tyenvinner = copyAndRemapAndBindTyparsFull remapAttrib tmenv tps
-    let tmenvinner = tyenvinner 
-    tps', tmenvinner
+let tmenvCopyRemapAndBindTypars remapAttrib tmenv tps =
+    match tmenv.realsig with
+    | false ->
+        let tps', tyenvinner = copyAndRemapAndBindTyparsFull remapAttrib tmenv tps
+        let tmenvinner = tyenvinner 
+        tps', tmenvinner
+    | true ->
+        tps, tmenv
 
 type RemapContext =
     { g: TcGlobals
@@ -6083,7 +6093,10 @@ and remapOpExpr (ctxt: RemapContext) (compgen: ValCopyFlag) (tmenv: Remap) (op, 
 
 and remapAppExpr (ctxt: RemapContext) (compgen: ValCopyFlag) (tmenv: Remap) (e1, e1ty, tyargs, args, m) origExpr =
     let e1R = remapExprImpl ctxt compgen tmenv e1 
-    let e1tyR = remapPossibleForallTyImpl ctxt tmenv e1ty 
+    let e1tyR =
+        match tmenv.realsig with
+        | false -> remapPossibleForallTyImpl ctxt tmenv e1ty
+        | true -> e1ty
     let tyargsR = remapTypes tmenv tyargs 
     let argsR = remapExprs ctxt compgen tmenv args 
     if e1 === e1R && e1ty === e1tyR && tyargs === tyargsR && args === argsR then origExpr 
@@ -6333,55 +6346,60 @@ and copyTycon compgen (tycon: Tycon) =
     | _ -> Construct.NewClonedTycon tycon
 
 /// This operates over a whole nested collection of tycons and vals simultaneously *)
-and copyAndRemapAndBindTyconsAndVals ctxt compgen tmenv tycons vs = 
+and copyAndRemapAndBindTyconsAndVals ctxt compgen tmenv tycons vs =
+
     let tyconsR = tycons |> List.map (copyTycon compgen)
 
     let tmenvinner = bindTycons tycons tyconsR tmenv
-    
+
     // Values need to be copied and renamed. 
     let vsR, tmenvinner = copyAndRemapAndBindVals ctxt compgen tmenvinner vs
 
     // "if a type constructor is hidden then all its inner values and inner type constructors must also be hidden" 
-    // Hence we can just lookup the inner tycon/value mappings in the tables. 
+    // Hence we can just lookup the inner tycon/value mappings in the tables.
 
-    let lookupVal (v: Val) = 
-        let vref = 
-            try  
-               let res = tmenvinner.valRemap[v]
-               res 
-            with :? KeyNotFoundException -> 
+    let lookupVal (v: Val) =
+        let vref =
+            try
+                let res = tmenvinner.valRemap[v]
+                res 
+            with :? KeyNotFoundException ->
                 errorR(InternalError(sprintf "couldn't remap internal value '%s'" v.LogicalName, v.Range))
                 mkLocalValRef v
         vref.Deref
         
-    let lookupTycon tycon = 
-        let tcref = 
-            try 
+    let lookupTycon tycon =
+        let tcref =
+            try
                 let res = tmenvinner.tyconRefRemap[mkLocalTyconRef tycon]
                 res
-            with :? KeyNotFoundException -> 
+            with :? KeyNotFoundException ->
                 errorR(InternalError("couldn't remap internal tycon " + showL(DebugPrint.tyconL tycon), tycon.Range))
                 mkLocalTyconRef tycon
         tcref.Deref
 
-    (tycons, tyconsR) ||> List.iter2 (fun tcd tcdR ->
+    (tycons, tyconsR)
+    ||> List.iter2 (fun tcd tcdR ->
         let lookupTycon tycon = lookupTycon tycon
         let tpsR, tmenvinner2 = tmenvCopyRemapAndBindTypars (remapAttribs ctxt tmenvinner) tmenvinner (tcd.entity_typars.Force(tcd.entity_range))
+
         tcdR.entity_typars <- LazyWithContext.NotLazy tpsR
         tcdR.entity_attribs <- tcd.entity_attribs |> remapAttribs ctxt tmenvinner2
         tcdR.entity_tycon_repr <- tcd.entity_tycon_repr |> remapTyconRepr ctxt tmenvinner2
+
         let typeAbbrevR = tcd.TypeAbbrev |> Option.map (remapType tmenvinner2)
+
         tcdR.entity_tycon_tcaug <- tcd.entity_tycon_tcaug |> remapTyconAug tmenvinner2
-        tcdR.entity_modul_type <- MaybeLazy.Strict (tcd.entity_modul_type.Value 
-                                                        |> mapImmediateValsAndTycons lookupTycon lookupVal)
+        tcdR.entity_modul_type <- MaybeLazy.Strict (tcd.entity_modul_type.Value |> mapImmediateValsAndTycons lookupTycon lookupVal)
+
         let exnInfoR = tcd.ExceptionInfo |> remapTyconExnInfo ctxt tmenvinner2
         match tcdR.entity_opt_data with
         | Some optData -> tcdR.entity_opt_data <- Some { optData with entity_tycon_abbrev = typeAbbrevR; entity_exn_info = exnInfoR }
-        | _ -> 
+        | _ ->
             tcdR.SetTypeAbbrev typeAbbrevR
             tcdR.SetExceptionInfo exnInfoR)
-    tyconsR, vsR, tmenvinner
 
+    tyconsR, vsR, tmenvinner
 
 and allTyconsOfTycon (tycon: Tycon) =
     seq { yield tycon
