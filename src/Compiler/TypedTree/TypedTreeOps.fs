@@ -220,10 +220,11 @@ let rec remapTypeAux (tyenv: Remap) (ty: TType) =
       TType_fun (domainTyR, retTyR, flags)
 
   | TType_forall (tps, ty) ->
-      let tpsR, tyenv =
-          match tyenv.realsig with
-          | false -> copyAndRemapAndBindTypars tyenv tps
-          | true -> tps, tyenv
+      let tpsR, tyenv = copyAndRemapAndBindTypars tyenv tps
+        //@@@@@@@@@@@@@@@@@@@@ 
+        //match tyenv.realsig with
+        //| false -> copyAndRemapAndBindTypars tyenv tps
+        //| true -> tps, tyenv
       TType_forall (tpsR, remapTypeAux tyenv ty)
 
   | TType_measure unt -> 
@@ -392,7 +393,7 @@ let remapTypeFull remapAttrib tyenv ty =
     else
         match tyenv.realsig, stripTyparEqns ty with
         | false, TType_forall(tps, tau) ->
-            let tpsR, tyenvinner =
+            let tpsR, tyenvinner = //@@@@@@@@@@@@@@@@@ copyAndRemapAndBindTyparsFull remapAttrib tyenv tps
                 match tyenv.realsig with
                 | false -> copyAndRemapAndBindTyparsFull remapAttrib tyenv tps
                 | true -> tps, tyenv
@@ -406,12 +407,14 @@ let remapParam tyenv (TSlotParam(nm, ty, fl1, fl2, fl3, attribs) as x) =
 let remapSlotSig remapAttrib tyenv (TSlotSig(nm, ty, ctps, methTypars, paraml, retTy) as x) =
     if isRemapEmpty tyenv then x else 
     let tyR = remapTypeAux tyenv ty
-    let ctpsR, tyenvinner =
-        match tyenv.realsig with
-        | false -> copyAndRemapAndBindTyparsFull remapAttrib tyenv ctps
-        | true -> ctps, tyenv
-
+    let ctpsR, tyenvinner = copyAndRemapAndBindTyparsFull remapAttrib tyenv ctps
+        //match tyenv.realsig with
+        //| false -> copyAndRemapAndBindTyparsFull remapAttrib tyenv ctps
+        //| true -> ctps, tyenv
     let methTyparsR, tyenvinner = copyAndRemapAndBindTyparsFull remapAttrib tyenvinner methTypars
+        //match tyenvinner.realsig with
+        //| false -> copyAndRemapAndBindTyparsFull remapAttrib tyenvinner methTypars
+        //| true -> methTypars, tyenvinner
     TSlotSig(nm, tyR, ctpsR, methTyparsR, List.mapSquared (remapParam tyenvinner) paraml, Option.map (remapTypeAux tyenvinner) retTy) 
 
 let mkInstRemap tpinst = { Remap.Empty with tpinst = tpinst }
@@ -5876,6 +5879,7 @@ let remapAttribKind tmenv k =
     | FSAttrib vref -> FSAttrib(remapValRef tmenv vref)
 
 let tmenvCopyRemapAndBindTypars remapAttrib tmenv tps =
+    //@@@@@@@@@@@@@@@@@@@@@@@@@ copyAndRemapAndBindTyparsFull remapAttrib tmenv tps
     match tmenv.realsig with
     | false ->
         let tps', tyenvinner = copyAndRemapAndBindTyparsFull remapAttrib tmenv tps
@@ -6093,10 +6097,7 @@ and remapOpExpr (ctxt: RemapContext) (compgen: ValCopyFlag) (tmenv: Remap) (op, 
 
 and remapAppExpr (ctxt: RemapContext) (compgen: ValCopyFlag) (tmenv: Remap) (e1, e1ty, tyargs, args, m) origExpr =
     let e1R = remapExprImpl ctxt compgen tmenv e1 
-    let e1tyR =
-        match tmenv.realsig with
-        | false -> remapPossibleForallTyImpl ctxt tmenv e1ty
-        | true -> e1ty
+    let e1tyR = remapPossibleForallTyImpl ctxt tmenv e1ty
     let tyargsR = remapTypes tmenv tyargs 
     let argsR = remapExprs ctxt compgen tmenv args 
     if e1 === e1R && e1ty === e1tyR && tyargs === tyargsR && args === argsR then origExpr 
