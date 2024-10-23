@@ -484,10 +484,15 @@ printfn "%A" (MyClass.result())
         ]
 
 
-    [<InlineData(true)>]        // RealSig
-    [<InlineData(false)>]       // Regular
+    [<InlineData(true, true)>]          // RealSig Optimize
+    [<InlineData(true, false)>]         // RealSig NoOptimize
+    [<InlineData(false, true)>]         // Regular Optimize
+    [<InlineData(false, false)>]        // Regular NoOptimize
     [<Theory>]
-    let ``nested generic closure`` (realSig) =
+    let ``nested generic closure`` (realSig, optimize) =
+        let withOptimization compilation =
+            if optimize then compilation |> withOptimize
+            else compilation |> withNoOptimize
 
         FSharp """
 // Copyright (c) Microsoft Corporation.  All Rights Reserved.  See License.txt in the project root for license information.
@@ -842,11 +847,11 @@ namespace Microsoft.FSharp.Core.CompilerServices
 """
         |> asExe
         |> withRealInternalSignature realSig
-        |> withOptimize
+        |> withOptimization
         |> compileAndRun
         |> shouldSucceed
 
-    //[<InlineData(true, true)>]          // RealSig Optimize
+    [<InlineData(true, true)>]          // RealSig Optimize
     [<InlineData(true, false)>]         // RealSig NoOptimize
     [<InlineData(false, true)>]         // Regular Optimize
     [<InlineData(false, false)>]        // Regular NoOptimize
@@ -1071,7 +1076,6 @@ type internal AgedLookup<'Token, 'Key, 'Value when 'Value: not struct>(keepStron
 namespace Equality
 
 type BigGenericTuple<'a> = BigGenericTuple of int * 'a * byte * int * 'a * byte
-
     """
         |> asLibrary
         |> withRealInternalSignature realSig

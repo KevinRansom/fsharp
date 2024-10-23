@@ -220,11 +220,10 @@ let rec remapTypeAux (tyenv: Remap) (ty: TType) =
       TType_fun (domainTyR, retTyR, flags)
 
   | TType_forall (tps, ty) ->
-      let tpsR, tyenv = copyAndRemapAndBindTypars tyenv tps
-        //@@@@@@@@@@@@@@@@@@@@ 
-        //match tyenv.realsig with
-        //| false -> copyAndRemapAndBindTypars tyenv tps
-        //| true -> tps, tyenv
+      let tpsR, tyenv = //@@@@@@@@@@@@@@@@@@@@ copyAndRemapAndBindTypars tyenv tps
+        match tyenv.realsig with
+        | false -> copyAndRemapAndBindTypars tyenv tps
+        | true -> tps, tyenv
       TType_forall (tpsR, remapTypeAux tyenv ty)
 
   | TType_measure unt -> 
@@ -329,7 +328,7 @@ and bindTypars tps tyargs tpinst =
 // This version is used to remap most type parameters, e.g. ones bound at tycons, vals, records 
 // See notes below on remapTypeFull for why we have a function that accepts remapAttribs as an argument 
 and copyAndRemapAndBindTyparsFull remapAttrib tyenv tps =
-    match tps with 
+    match tps with
     | [] -> tps, tyenv
     | _ ->
         let tpsR = copyTypars false tps
@@ -5880,13 +5879,13 @@ let remapAttribKind tmenv k =
 
 let tmenvCopyRemapAndBindTypars remapAttrib tmenv tps =
     //@@@@@@@@@@@@@@@@@@@@@@@@@ copyAndRemapAndBindTyparsFull remapAttrib tmenv tps
-    match tmenv.realsig with
-    | false ->
+    //match tmenv.realsig with
+    //| false ->
         let tps', tyenvinner = copyAndRemapAndBindTyparsFull remapAttrib tmenv tps
         let tmenvinner = tyenvinner 
         tps', tmenvinner
-    | true ->
-        tps, tmenv
+    //| true ->
+    //    tps, tmenv
 
 type RemapContext =
     { g: TcGlobals
@@ -6382,8 +6381,12 @@ and copyAndRemapAndBindTyconsAndVals ctxt compgen tmenv tycons vs =
     (tycons, tyconsR)
     ||> List.iter2 (fun tcd tcdR ->
         let lookupTycon tycon = lookupTycon tycon
-        let tpsR, tmenvinner2 = tmenvCopyRemapAndBindTypars (remapAttribs ctxt tmenvinner) tmenvinner (tcd.entity_typars.Force(tcd.entity_range))
-
+        let tpsR, tmenvinner2 =
+            //let tps = tcd.entity_typars.Force(tcd.entity_range)
+            //match tmenvinner.realsig with
+            //| false -> tmenvCopyRemapAndBindTypars (remapAttribs ctxt tmenvinner) tmenvinner tps
+            //| true -> tps, tmenv
+            tmenvCopyRemapAndBindTypars (remapAttribs ctxt tmenvinner) tmenvinner (tcd.entity_typars.Force(tcd.entity_range))
         tcdR.entity_typars <- LazyWithContext.NotLazy tpsR
         tcdR.entity_attribs <- tcd.entity_attribs |> remapAttribs ctxt tmenvinner2
         tcdR.entity_tycon_repr <- tcd.entity_tycon_repr |> remapTyconRepr ctxt tmenvinner2
