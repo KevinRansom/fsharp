@@ -220,10 +220,7 @@ let rec remapTypeAux (tyenv: Remap) (ty: TType) =
       TType_fun (domainTyR, retTyR, flags)
 
   | TType_forall (tps, ty) ->
-      let tpsR, tyenv = //@@@@@@@@@@@@@@@@@@@@ copyAndRemapAndBindTypars tyenv tps
-        match tyenv.realsig with
-        | false -> copyAndRemapAndBindTypars tyenv tps
-        | true -> tps, tyenv
+      let tpsR, tyenv = copyAndRemapAndBindTypars tyenv tps
       TType_forall (tpsR, remapTypeAux tyenv ty)
 
   | TType_measure unt -> 
@@ -331,12 +328,15 @@ and copyAndRemapAndBindTyparsFull remapAttrib tyenv tps =
     match tps with
     | [] -> tps, tyenv
     | _ ->
-        let tpsR = copyTypars false tps
-        let tyenv = { tyenv with tpinst = bindTypars tps (generalizeTypars tpsR) tyenv.tpinst }
-        (tps, tpsR) ||> List.iter2 (fun tporig tp ->
-                tp.SetConstraints (remapTyparConstraintsAux tyenv tporig.Constraints)
-                tp.SetAttribs (tporig.Attribs |> remapAttrib))
-        tpsR, tyenv
+        match tyenv.realsig with
+        | false ->
+            let tpsR = copyTypars false tps
+            let tyenv = { tyenv with tpinst = bindTypars tps (generalizeTypars tpsR) tyenv.tpinst }
+            (tps, tpsR) ||> List.iter2 (fun tporig tp ->
+                    tp.SetConstraints (remapTyparConstraintsAux tyenv tporig.Constraints)
+                    tp.SetAttribs (tporig.Attribs |> remapAttrib))
+            tpsR, tyenv
+        | true -> tps, tyenv
 
 // copies bound typars, extends tpinst 
 and copyAndRemapAndBindTypars tyenv tps =
@@ -392,10 +392,7 @@ let remapTypeFull remapAttrib tyenv ty =
     else
         match tyenv.realsig, stripTyparEqns ty with
         | false, TType_forall(tps, tau) ->
-            let tpsR, tyenvinner = //@@@@@@@@@@@@@@@@@ copyAndRemapAndBindTyparsFull remapAttrib tyenv tps
-                match tyenv.realsig with
-                | false -> copyAndRemapAndBindTyparsFull remapAttrib tyenv tps
-                | true -> tps, tyenv
+            let tpsR, tyenvinner = copyAndRemapAndBindTyparsFull remapAttrib tyenv tps
             TType_forall(tpsR, remapType tyenvinner tau)
         | _-> remapType tyenv ty
 
@@ -5877,15 +5874,7 @@ let remapAttribKind tmenv k =
     | ILAttrib _ as x -> x
     | FSAttrib vref -> FSAttrib(remapValRef tmenv vref)
 
-let tmenvCopyRemapAndBindTypars remapAttrib tmenv tps =
-    //@@@@@@@@@@@@@@@@@@@@@@@@@ copyAndRemapAndBindTyparsFull remapAttrib tmenv tps
-    //match tmenv.realsig with
-    //| false ->
-        let tps', tyenvinner = copyAndRemapAndBindTyparsFull remapAttrib tmenv tps
-        let tmenvinner = tyenvinner 
-        tps', tmenvinner
-    //| true ->
-    //    tps, tmenv
+let tmenvCopyRemapAndBindTypars remapAttrib tmenv tps = copyAndRemapAndBindTyparsFull remapAttrib tmenv tps
 
 type RemapContext =
     { g: TcGlobals

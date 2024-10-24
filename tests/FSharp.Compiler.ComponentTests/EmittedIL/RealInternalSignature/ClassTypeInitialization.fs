@@ -1082,3 +1082,21 @@ type BigGenericTuple<'a> = BigGenericTuple of int * 'a * byte * int * 'a * byte
         |> withOptimization
         |> compile
         |> shouldSucceed
+
+    //[<InlineData(true, true)>]          // RealSig Optimize
+    //[<InlineData(true, false)>]         // RealSig NoOptimize
+    //[<InlineData(false, true)>]         // Regular Optimize
+    //[<InlineData(false, false)>]        // Regular NoOptimize
+    //[<Theory>]
+    //let ``Issue3Minimal`` (realSig, optimize) =
+    //    let withOptimization compilation =
+    //        if optimize then compilation |> withOptimize
+    //        else compilation |> withNoOptimize
+
+    //    FSharp """
+    //"""
+    //    |> asLibrary
+    //    |> withRealInternalSignature realSig
+    //    |> withOptimization
+    //    |> compile
+    //    |> shouldSucceed
