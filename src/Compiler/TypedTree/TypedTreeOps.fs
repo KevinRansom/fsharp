@@ -413,16 +413,16 @@ let remapSlotSig remapAttrib tyenv (TSlotSig(nm, ty, ctps, methTypars, paraml, r
         //| true -> methTypars, tyenvinner
     TSlotSig(nm, tyR, ctpsR, methTyparsR, List.mapSquared (remapParam tyenvinner) paraml, Option.map (remapTypeAux tyenvinner) retTy) 
 
-let mkInstRemap tpinst = { Remap.Empty with tpinst = tpinst }
+let mkInstRemap tpinst realsig = { Remap.Empty with tpinst = tpinst; realsig = realsig}
 
 // entry points for "typar -> TType" instantiation 
-let instType tpinst x = if isNil tpinst then x else remapTypeAux (mkInstRemap tpinst) x
-let instTypes tpinst x = if isNil tpinst then x else remapTypesAux (mkInstRemap tpinst) x
-let instTrait tpinst x = if isNil tpinst then x else remapTraitInfo (mkInstRemap tpinst) x
-let instTyparConstraints tpinst x = if isNil tpinst then x else remapTyparConstraintsAux (mkInstRemap tpinst) x
-let instSlotSig tpinst ss = remapSlotSig (fun _ -> []) (mkInstRemap tpinst) ss
+let instType tpinst x = if isNil tpinst then x else remapTypeAux (mkInstRemap tpinst false) x                       // Todo: figure out how to set this correctly
+let instTypeWithRealsig tpinst realsig x = if isNil tpinst then x else remapTypeAux (mkInstRemap tpinst realsig) x
+let instTypes tpinst x = if isNil tpinst then x else remapTypesAux (mkInstRemap tpinst false) x
+let instTrait tpinst x = if isNil tpinst then x else remapTraitInfo (mkInstRemap tpinst false) x
+let instTyparConstraints tpinst x = if isNil tpinst then x else remapTyparConstraintsAux (mkInstRemap tpinst false) x
+let instSlotSig tpinst ss = remapSlotSig (fun _ -> []) (mkInstRemap tpinst false) ss
 let copySlotSig ss = remapSlotSig (fun _ -> []) Remap.Empty ss
-
 
 let mkTyparToTyparRenaming tpsorig tps = 
     let tinst = generalizeTypars tps
@@ -6519,7 +6519,7 @@ let copyImplFile g compgen e =
 
 let instExpr g tpinst e =
     let ctxt = { g = g; stackGuard = StackGuard(RemapExprStackGuardDepth, "RemapExprStackGuardDepth") }
-    remapExprImpl ctxt CloneAll (mkInstRemap tpinst) e
+    remapExprImpl ctxt CloneAll (mkInstRemap tpinst g.realsig) e
 
 //--------------------------------------------------------------------------
 // Replace Marks - adjust debugging marks when a lambda gets
@@ -8515,19 +8515,21 @@ let MakeArgsForTopArgs _g m argTysl tpenv =
             fst (mkCompGenLocal m nm ty)))
 
 let AdjustValForExpectedValReprInfo g m (vref: ValRef) flags valReprInfo =
-
     let tps, argTysl, retTy, _ = GetValReprTypeInFSharpForm g valReprInfo vref.Type m
-    let tpsR = copyTypars false tps
+    let tpsR =
+        match g.realsig with
+        | true -> tps
+        | false -> copyTypars false tps
     let tyargsR = List.map mkTyparTy tpsR
     let tpenv = bindTypars tps tyargsR emptyTyparInst
-    let rtyR = instType tpenv retTy
+    let rtyR = instTypeWithRealsig tpenv g.realsig retTy
     let vsl = MakeArgsForTopArgs g m argTysl tpenv
     let call = MakeApplicationAndBetaReduce g (Expr.Val (vref, flags, m), vref.Type, [tyargsR], (List.map (mkRefTupledVars g m) vsl), m)
-    let tauexpr, tauty = 
-        List.foldBack 
-            (fun vs (e, ty) -> mkMultiLambda m vs (e, ty), (mkFunTy g (mkRefTupledVarsTy g vs) ty))
-            vsl
-            (call, rtyR)
+    let tauexpr, tauty =
+       List.foldBack 
+           (fun vs (e, ty) -> mkMultiLambda m vs (e, ty), (mkFunTy g (mkRefTupledVarsTy g vs) ty))
+           vsl
+           (call, rtyR)
     // Build a type-lambda expression for the toplevel value if needed... 
     mkTypeLambda m tpsR (tauexpr, tauty), tpsR +-> tauty
 

@@ -1083,20 +1083,22 @@ type BigGenericTuple<'a> = BigGenericTuple of int * 'a * byte * int * 'a * byte
         |> compile
         |> shouldSucceed
 
-    //[<InlineData(true, true)>]          // RealSig Optimize
-    //[<InlineData(true, false)>]         // RealSig NoOptimize
-    //[<InlineData(false, true)>]         // Regular Optimize
-    //[<InlineData(false, false)>]        // Regular NoOptimize
-    //[<Theory>]
-    //let ``Issue3Minimal`` (realSig, optimize) =
-    //    let withOptimization compilation =
-    //        if optimize then compilation |> withOptimize
-    //        else compilation |> withNoOptimize
+    [<InlineData(true, true)>]          // RealSig Optimize
+    [<InlineData(true, false)>]         // RealSig NoOptimize
+    [<InlineData(false, true)>]         // Regular Optimize
+    [<InlineData(false, false)>]        // Regular NoOptimize
+    [<Theory>]
+    let ``Array.groupBy id`` (realSig, optimize) =
+        let withOptimization compilation =
+            if optimize then compilation |> withOptimize
+            else compilation |> withNoOptimize
 
-    //    FSharp """
-    //"""
-    //    |> asLibrary
-    //    |> withRealInternalSignature realSig
-    //    |> withOptimization
-    //    |> compile
-    //    |> shouldSucceed
+        FSharp """
+module GroupByTest
+let ``for _ in Array.groupBy id [||] do ...`` () = [|for _ in Array.groupBy id [||] do 0|]
+    """
+        |> asLibrary
+        |> withRealInternalSignature realSig
+        |> withOptimization
+        |> compile
+        |> shouldSucceed
