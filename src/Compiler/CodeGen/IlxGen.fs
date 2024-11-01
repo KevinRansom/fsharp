@@ -6924,7 +6924,7 @@ and GetIlxClosureFreeVars cenv m (thisVars: ValRef list) boxity eenv takenNames 
 
         let ilCloTypeRef = NestedTypeRefForCompLoc eenv.cloc cloName
 
-        let initialFreeTyvars = { emptyFreeTyvars with FreeTypars = eenv.nestedTypars }
+        let initialFreeTyvars = {emptyFreeTyvars with FreeTypars = eenv.nestedTypars}
 
         ilCloTypeRef, initialFreeTyvars
 

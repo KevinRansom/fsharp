@@ -88,7 +88,7 @@ let ReparentSlotSigToUseMethodTypars g m ovByMethValRef slotsig =
     match PartitionValRefTypars g ovByMethValRef with
     | Some(_, enclosingTypars, _, _, _) ->
         let parentToMemberInst, _ = mkTyparToTyparRenaming (ovByMethValRef.MemberApparentEntity.Typars m) enclosingTypars
-        let res = instSlotSig parentToMemberInst slotsig
+        let res = instSlotSig parentToMemberInst slotsig g.realsig
         res
     | None ->
         // Note: it appears PartitionValRefTypars should never return 'None'
@@ -1353,7 +1353,7 @@ type MethInfo =
             // REVIEW: should we copy down attributes to slot params?
             let tcref =  tcrefOfAppTy g x.ApparentEnclosingAppType
             let formalEnclosingTyparsOrig = tcref.Typars m
-            let formalEnclosingTypars = copyTypars false formalEnclosingTyparsOrig
+            let formalEnclosingTypars = formalEnclosingTyparsOrig  //copyTypars false formalEnclosingTyparsOrig
             let _, formalEnclosingTyparTys = FixupNewTypars m [] [] formalEnclosingTyparsOrig formalEnclosingTypars
             let formalMethTypars = copyTypars false x.FormalMethodTypars
             let _, formalMethTyparTys = FixupNewTypars m formalEnclosingTypars formalEnclosingTyparTys x.FormalMethodTypars formalMethTypars

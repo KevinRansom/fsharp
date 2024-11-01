@@ -1271,7 +1271,7 @@ val copyImplFile: TcGlobals -> ValCopyFlag -> CheckedImplFile -> CheckedImplFile
 val copySlotSig: SlotSig -> SlotSig
 
 /// Instantiate the generic type parameters in a method slot signature, building a new one
-val instSlotSig: TyparInstantiation -> SlotSig -> SlotSig
+val instSlotSig: TyparInstantiation -> SlotSig -> bool -> SlotSig
 
 /// Instantiate the generic type parameters in an expression, building a new one
 val instExpr: TcGlobals -> TyparInstantiation -> Expr -> Expr

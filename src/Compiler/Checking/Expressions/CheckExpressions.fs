@@ -1828,17 +1828,18 @@ let MakeAndPublishSimpleValsForMergedScope (cenv: cenv) env m (names: NameMap<_>
 // to C<_> occurs then generate C<?ty> for a fresh type inference variable ?ty.
 //-------------------------------------------------------------------------
 
-let FreshenTyconRef (g: TcGlobals) m rigid (tcref: TyconRef) declaredTyconTypars =
+let FreshenTyconRef (g: TcGlobals) m rigid (tcref: TyconRef) declaredTyconTypars doCopyTypars =
     let origTypars = declaredTyconTypars
     let clearStaticReq = g.langVersion.SupportsFeature LanguageFeature.InterfacesWithAbstractStaticMembers
     let freshTypars =
-        if not g.realsig then
-            copyTypars clearStaticReq origTypars
+        if doCopyTypars then
+            let typars = copyTypars clearStaticReq origTypars
+            if rigid <> TyparRigidity.Rigid then
+                for tp in typars do
+                    tp.SetRigidity rigid
+            typars
         else
             origTypars
-    if rigid <> TyparRigidity.Rigid then
-        for tp in freshTypars do
-            tp.SetRigidity rigid
 
     let renaming, tinst = FixupNewTypars m [] [] origTypars freshTypars
     let origTy = TType_app(tcref, List.map mkTyparTy origTypars, g.knownWithoutNull)
@@ -2667,11 +2668,11 @@ module EventDeclarationNormalization =
 
 /// Make a copy of the "this" type for a generic object type, e.g. List<'T> --> List<'?> for a fresh inference variable.
 /// Also adjust the "this" type to take into account whether the type is a struct.
-let FreshenObjectArgType (cenv: cenv) m rigid tcref isExtrinsic declaredTyconTypars =
+let FreshenObjectArgType (cenv: cenv) m rigid tcref isExtrinsic declaredTyconTypars doCopyTycons =
     let g = cenv.g
 
     let tcrefObjTy, enclosingDeclaredTypars, renaming, objTy =
-        FreshenTyconRef g m rigid tcref declaredTyconTypars
+        FreshenTyconRef g m rigid tcref declaredTyconTypars doCopyTycons
 
     // Struct members have a byref 'this' type (unless they are extrinsic extension members)
     let thisTy =
@@ -4202,7 +4203,7 @@ and TcValSpec (cenv: cenv) env declKind newOk containerInfo memFlagsOpt thisTyOp
         | Some(MemberOrValContainerInfo(tcref, _, _, _, declaredTyconTypars)) ->
             let isExtrinsic = (declKind = ExtrinsicExtensionBinding)
             let _, enclosingDeclaredTypars, _, _, thisTy =
-                FreshenObjectArgType cenv m TyparRigidity.Rigid tcref isExtrinsic declaredTyconTypars
+                FreshenObjectArgType cenv m TyparRigidity.Rigid tcref isExtrinsic declaredTyconTypars (not g.realsig)
 
             // An implemented interface type is in terms of the type's type parameters.
             // We need a signature in terms of the values' type parameters.
@@ -11879,7 +11880,7 @@ and AnalyzeRecursiveStaticMemberOrValDecl
            CheckForNonAbstractInterface g declKind tcref memberFlags true id.idRange
 
            let isExtrinsic = (declKind = ExtrinsicExtensionBinding)
-           let tcrefObjTy, enclosingDeclaredTypars, renaming, _, _ = FreshenObjectArgType cenv mBinding TyparRigidity.WillBeRigid tcref isExtrinsic declaredTyconTypars
+           let tcrefObjTy, enclosingDeclaredTypars, renaming, _, _ = FreshenObjectArgType cenv mBinding TyparRigidity.WillBeRigid tcref isExtrinsic declaredTyconTypars (not g.realsig)
            let envinner = AddDeclaredTypars CheckForDuplicateTypars enclosingDeclaredTypars envinner
            let envinner = MakeInnerEnvForTyconRef envinner tcref isExtrinsic
 
@@ -11904,7 +11905,7 @@ and AnalyzeRecursiveStaticMemberOrValDecl
             error(Error(FSComp.SR.tcConstructorsDisallowedInExceptionAugmentation(), id.idRange))
 
         let isExtrinsic = (declKind = ExtrinsicExtensionBinding)
-        let _, enclosingDeclaredTypars, _, objTy, thisTy = FreshenObjectArgType cenv mBinding TyparRigidity.WillBeRigid tcref isExtrinsic declaredTyconTypars
+        let _, enclosingDeclaredTypars, _, objTy, thisTy = FreshenObjectArgType cenv mBinding TyparRigidity.WillBeRigid tcref isExtrinsic declaredTyconTypars (not g.realsig)
         let envinner = AddDeclaredTypars CheckForDuplicateTypars enclosingDeclaredTypars envinner
         let envinner = MakeInnerEnvForTyconRef envinner tcref isExtrinsic
 
@@ -11990,7 +11991,7 @@ and AnalyzeRecursiveInstanceMemberDecl
 
          // The type being augmented tells us the type of 'this'
          let isExtrinsic = (declKind = ExtrinsicExtensionBinding)
-         let tcrefObjTy, enclosingDeclaredTypars, renaming, objTy, thisTy = FreshenObjectArgType cenv mBinding TyparRigidity.WillBeRigid tcref isExtrinsic declaredTyconTypars
+         let tcrefObjTy, enclosingDeclaredTypars, renaming, objTy, thisTy = FreshenObjectArgType cenv mBinding TyparRigidity.WillBeRigid tcref isExtrinsic declaredTyconTypars (not g.realsig)
 
          let envinner = AddDeclaredTypars CheckForDuplicateTypars enclosingDeclaredTypars envinner
 

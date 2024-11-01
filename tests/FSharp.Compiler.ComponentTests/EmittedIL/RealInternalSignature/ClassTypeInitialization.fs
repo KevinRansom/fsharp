@@ -1067,7 +1067,7 @@ type internal AgedLookup<'Token, 'Key, 'Value when 'Value: not struct>(keepStron
     [<InlineData(false, true)>]         // Regular Optimize
     [<InlineData(false, false)>]        // Regular NoOptimize
     [<Theory>]
-    let ``BigTuples`` (realSig, optimize) =
+    let BigTuple (realSig, optimize) =
         let withOptimization compilation =
             if optimize then compilation |> withOptimize
             else compilation |> withNoOptimize
@@ -1088,14 +1088,14 @@ type BigGenericTuple<'a> = BigGenericTuple of int * 'a * byte * int * 'a * byte
     [<InlineData(false, true)>]         // Regular Optimize
     [<InlineData(false, false)>]        // Regular NoOptimize
     [<Theory>]
-    let ``Array.groupBy id`` (realSig, optimize) =
+    let ``Array_groupBy id`` (realSig, optimize) =
         let withOptimization compilation =
             if optimize then compilation |> withOptimize
             else compilation |> withNoOptimize
 
         FSharp """
 module GroupByTest
-let ``for _ in Array.groupBy id [||] do ...`` () = [|for _ in Array.groupBy id [||] do 0|]
+let ``for _ in Array_groupBy id [||] do ...`` () = [|for _ in Array.groupBy id [||] do 0|]
     """
         |> asLibrary
         |> withRealInternalSignature realSig
