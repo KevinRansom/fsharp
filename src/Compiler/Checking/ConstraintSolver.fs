@@ -2549,15 +2549,18 @@ and AddConstraint (csenv: ConstraintSolverEnv) ndeep m2 trace tp newConstraint  
               | _ -> false) then 
             ()
         elif IsRigid csenv tp then
+            let errorAThing tp = ErrorD (ConstraintSolverMissingConstraint(denv, tp, newConstraint, m, m2))
+
             if not impliedByExistingConstraints then
-                return! ErrorD (ConstraintSolverMissingConstraint(denv, tp, newConstraint, m, m2))
+                return! errorAThing tp
         else
             // It is important that we give a warning if a constraint is missing from a 
             // will-be-made-rigid type variable. This is because the existence of these warnings
             // is relevant to the overload resolution rules (see 'candidateWarnCount' in the overload resolution
             // implementation).
+            let warnAThing tp = WarnD (ConstraintSolverMissingConstraint(denv, tp, newConstraint, m, m2))
             if tp.Rigidity.WarnIfMissingConstraint then
-                do! WarnD (ConstraintSolverMissingConstraint(denv, tp, newConstraint, m, m2))
+                do! warnAThing tp
 
             let newConstraints = EliminateRedundantConstraints csenv allCxs []
 

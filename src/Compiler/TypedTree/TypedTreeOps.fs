@@ -324,24 +324,21 @@ and bindTypars tps tyargs tpinst =
 
 // This version is used to remap most type parameters, e.g. ones bound at tycons, vals, records 
 // See notes below on remapTypeFull for why we have a function that accepts remapAttribs as an argument
-and copyAndRemapAndBindTyparsImpl remapAttrib tyenv tps =
-    match tps with
-    | [] -> tps, tyenv
-    | _ ->
-        let tpsR = copyTypars false tps
-        let tyenv = { tyenv with tpinst = bindTypars tps (generalizeTypars tpsR) tyenv.tpinst }
-        (tps, tpsR) ||> List.iter2 (fun tporig tp ->
-                tp.SetConstraints (remapTyparConstraintsAux tyenv tporig.Constraints)
-                tp.SetAttribs (tporig.Attribs |> remapAttrib))
-        tpsR, tyenv
-
 and copyAndRemapAndBindTyparsFull remapAttrib tyenv tps =
     match tps with
     | [] -> tps, tyenv
     | _ ->
-        match tyenv.realsig with
-        | false -> copyAndRemapAndBindTyparsImpl remapAttrib tyenv tps
-        | true -> tps, tyenv
+        let tpsR, tyenv =
+            match tyenv.realsig with
+            | false ->
+                let tpsR = copyTypars false tps
+                tpsR, { tyenv with tpinst = bindTypars tps (generalizeTypars tpsR) tyenv.tpinst }
+            | true -> tps, tyenv
+
+        (tps, tpsR) ||> List.iter2 (fun tporig tp ->
+                tp.SetConstraints (remapTyparConstraintsAux tyenv tporig.Constraints)
+                tp.SetAttribs (tporig.Attribs |> remapAttrib))
+        tpsR, tyenv
 
 // copies bound typars, extends tpinst 
 and copyAndBindTypars tyenv tps = copyAndRemapAndBindTyparsFull (fun _ -> []) tyenv tps
@@ -394,8 +391,8 @@ let remapTypes tyenv x =
 let remapTypeFull remapAttrib tyenv ty =
     if isRemapEmpty tyenv then ty
     else
-        match tyenv.realsig, stripTyparEqns ty with
-        | false, TType_forall(tps, tau) ->
+        match stripTyparEqns ty with
+        | TType_forall(tps, tau) ->
             let tpsR, tyenvinner = copyAndRemapAndBindTyparsFull remapAttrib tyenv tps
             TType_forall(tpsR, remapType tyenvinner tau)
         | _ -> remapType tyenv ty
@@ -408,7 +405,7 @@ let remapSlotSig remapAttrib tyenv (TSlotSig(nm, ty, ctps, methTypars, paraml, r
     if isRemapEmpty tyenv then x else 
     let tyR = remapTypeAux tyenv ty
     let ctpsR, tyenvinner = copyAndRemapAndBindTyparsFull remapAttrib tyenv ctps
-    let methTyparsR, tyenvinner = copyAndRemapAndBindTyparsImpl remapAttrib tyenvinner methTypars
+    let methTyparsR, tyenvinner = copyAndRemapAndBindTyparsFull remapAttrib tyenvinner methTypars
     TSlotSig(nm, tyR, ctpsR, methTyparsR, List.mapSquared (remapParam tyenvinner) paraml, Option.map (remapTypeAux tyenvinner) retTy) 
 
 let mkInstRemap tpinst realsig = { Remap.Empty with tpinst = tpinst; realsig = realsig}
