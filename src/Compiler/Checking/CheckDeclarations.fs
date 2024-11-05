@@ -4094,7 +4094,7 @@ module EstablishTypeDefinitionCores =
 
         // No inferred constraints allowed on declared typars 
         (envMutRecPrelim, withEnvs) ||> MutRecShapes.iterTyconsWithEnv (fun envForDecls (_, tyconOpt) -> 
-            tyconOpt |> Option.iter (fun tycon -> tycon.Typars m |> List.iter (SetTyparRigid envForDecls m)))
+            tyconOpt |> Option.iter (fun tycon -> tycon.Typars m |> List.iter (SetTyparRigid envForDecls.DisplayEnv m)))
         
         // Phase1E. OK, now recheck the abbreviations, super/interface and explicit constraints types (this time checking constraints)
         (envMutRecPrelim, withAttrs) ||> MutRecShapes.iterTyconsWithEnv (fun envForDecls (origInfo, tyconAndAttrsOpt) -> 
@@ -4232,7 +4232,7 @@ module TcDeclarations =
             let declaredTypars = TcTyparDecls cenv envForDecls synTypars
             let envForTycon = AddDeclaredTypars CheckForDuplicateTypars declaredTypars envForDecls
             let _tpenv = TcTyparConstraints cenv NoNewTypars CheckCxs ItemOccurrence.UseInType envForTycon emptyUnscopedTyparEnv synTyparCxs
-            declaredTypars |> List.iter (SetTyparRigid envForDecls m)
+            declaredTypars |> List.iter (SetTyparRigid envForDecls.DisplayEnv m)
 
             if isInSameModuleOrNamespace && not isInterfaceOrDelegateOrEnum then 
                 // For historical reasons we only give a warning for incorrect type parameters on intrinsic extensions

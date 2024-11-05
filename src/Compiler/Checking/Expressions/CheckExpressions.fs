@@ -1581,24 +1581,16 @@ let ChooseCanonicalValSchemeAfterInference g denv vscheme m =
 let PlaceTyparsInDeclarationOrder declaredTypars generalizedTypars =
     declaredTypars @ (generalizedTypars |> List.filter (fun tp -> not (ListSet.contains typarEq tp declaredTypars)))
 
-let SetTyparRigid cenv m (tp: Typar) =
+let SetTyparRigid denv m (tp: Typar) =
     match tp.Solution with
     | None -> ()
     | Some ty ->
         if tp.IsCompilerGenerated then
-            errorR(Error(FSComp.SR.tcGenericParameterHasBeenConstrained(NicePrint.prettyStringOfTy cenv.DisplayEnv ty), m))
+            errorR(Error(FSComp.SR.tcGenericParameterHasBeenConstrained(NicePrint.prettyStringOfTy denv ty), m))
         else
-            errorR(Error(FSComp.SR.tcTypeParameterHasBeenConstrained(NicePrint.prettyStringOfTy cenv.DisplayEnv ty), tp.Range))
+            errorR(Error(FSComp.SR.tcTypeParameterHasBeenConstrained(NicePrint.prettyStringOfTy denv ty), tp.Range))
 
     tp.SetRigidity TyparRigidity.Rigid
-    let filename = if cenv.DisplayEnv.g.realsig then @"c:\temp\sigplus.txt" else @"c:\temp\sigminus.txt"
-    System.IO.File.AppendAllLines(
-        filename, 
-        [|
-            yield $"Typar: {tp.DisplayName} - {tp.Rigidity}"
-            for tp in cenv.ExtraRigidTypars do
-                yield $"ExtraRigidTypars: {tp.DisplayName} - {tp.Rigidity}"
-        |])
 
 let GeneralizeVal (cenv: cenv) denv enclosingDeclaredTypars generalizedTyparsForThisBinding prelimVal =
 
@@ -1849,14 +1841,6 @@ let FreshenTyconRef (g: TcGlobals) m rigid (tcref: TyconRef) declaredTyconTypars
         if rigid <> TyparRigidity.Rigid then
             for tp in typars do
                 tp.SetRigidity rigid
-                let filename = if g.realsig then @"c:\temp\sigplus.txt" else @"c:\temp\sigminus.txt"
-                System.IO.File.AppendAllLines(
-                    filename, 
-                    [|
-                        yield $"Typar: {tp.DisplayName} - {tp.Rigidity}"
-                        for tp in env.ExtraRigidTypars do
-                            yield $"ExtraRigidTypars: {tp.DisplayName} - {tp.Rigidity}"
-                    |])
         typars
 
     let renaming, tinst = FixupNewTypars m [] [] origTypars freshTypars
@@ -11213,16 +11197,7 @@ and TcBindingTyparDecls alwaysRigid cenv env tpenv (ValTyparDecls(synTypars, syn
             rigidCopyOfDeclaredTypars |> List.iter (fun tp -> SetTyparRigid env.DisplayEnv tp.Range tp)
             // The type parameters using during inference will be marked rigid after inference
             declaredTypars
-            |> List.iter (fun tp ->
-                tp.SetRigidity TyparRigidity.WillBeRigid
-                let filename = if cenv.g.realsig then @"c:\temp\sigplus.txt" else @"c:\temp\sigminus.txt"
-                System.IO.File.AppendAllLines(
-                    filename, 
-                    [|
-                        yield $"Typar: {tp.DisplayName} - {tp.Rigidity}"
-                        for tp in env.ExtraRigidTypars do
-                            yield $"ExtraRigidTypars: {tp.DisplayName} - {tp.Rigidity}"
-                    |]))
+            |> List.iter (fun tp -> tp.SetRigidity TyparRigidity.WillBeRigid)
             rigidCopyOfDeclaredTypars
 
     ExplicitTyparInfo(rigidCopyOfDeclaredTypars, declaredTypars, infer), tpenv
