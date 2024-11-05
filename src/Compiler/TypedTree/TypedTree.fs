@@ -299,8 +299,12 @@ type TyparRigidity =
 /// Encode typar flags into a bit field  
 [<Struct>]
 type TyparFlags(flags: int32) =
-
-    new (kind: TyparKind, rigidity: TyparRigidity, isFromError: bool, isCompGen: bool, staticReq: TyparStaticReq, dynamicReq: TyparDynamicReq, equalityDependsOn: bool, comparisonDependsOn: bool, supportsNullFlex: bool) = 
+   new (kind: TyparKind, rigidity: TyparRigidity, isFromError: bool, isCompGen: bool, staticReq: TyparStaticReq, dynamicReq: TyparDynamicReq, equalityDependsOn: bool, comparisonDependsOn: bool, supportsNullFlex: bool) = 
+        System.IO.File.AppendAllLines(
+           @"c:\temp\flags.txt",
+            [|
+                yield $"TyparFlags: {rigidity}"
+            |])
         TyparFlags((if isFromError then                0b00000000000000010 else 0) |||
                    (if isCompGen   then                0b00000000000000100 else 0) |||
                    (match staticReq with
