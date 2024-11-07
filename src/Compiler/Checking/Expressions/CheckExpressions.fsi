@@ -476,7 +476,8 @@ val FreshenObjectArgType:
     tcref: TyconRef ->
     isExtrinsic: bool ->
     declaredTyconTypars: Typar list ->
-        TType * Typar list * TyparInstantiation * TType * TType
+    bool ->
+    TType * Typar list * TyparInstantiation * TType * TType
 
 /// Get the accumulated module/namespace type for the current module/namespace being processed.
 val GetCurrAccumulatedModuleOrNamespaceType: env: TcEnv -> ModuleOrNamespaceType
