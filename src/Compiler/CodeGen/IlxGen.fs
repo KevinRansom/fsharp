@@ -9830,7 +9830,20 @@ and AllocLocal cenv cgbuf eenv compgen (v, ty, isFixed) (scopeMarks: Mark * Mark
     let j, realloc =
         if cenv.options.localOptimizationsEnabled then
             cgbuf.ReallocLocal(
-                (fun i (_, ty2, isFixed2) -> not isFixed2 && not isFixed && not (IntMap.mem i eenv.liveLocals) && (ty = ty2)),
+                (fun i (_i, ty2, isFixed2) ->
+                    System.IO.File.AppendAllLines( @"c:\temp\kevin.txt", [| $"i: {i}  ===>  {eenv.liveLocals |> Zmap.keys} = {(IntMap.mem i eenv.liveLocals)}" |])
+                    let result = not isFixed2 && not isFixed && not (IntMap.mem i eenv.liveLocals) && (ty = ty2)
+                    System.IO.File.AppendAllLines(
+                        @"c:\temp\kevin.txt",
+                        [|
+                            $"{i} - {_i} - {ty.GetType().FullName}"
+                            $"{isFixed} - {eenv.liveLocals |> Zmap.keys |> List.length }"
+                            $"not isFixed2 && not isFixed && not (IntMap.mem i eenv.liveLocals) && (ty = ty2)"
+                            $"{not isFixed2} {not isFixed} {not (IntMap.mem i eenv.liveLocals)} && {(ty = ty2)}"
+                            $"Result = {result}"
+                        |])
+                    result
+                    ),
                 ranges,
                 ty,
                 isFixed
@@ -9840,9 +9853,13 @@ and AllocLocal cenv cgbuf eenv compgen (v, ty, isFixed) (scopeMarks: Mark * Mark
 
     j,
     realloc,
-    { eenv with
-        liveLocals = IntMap.add j () eenv.liveLocals
-    }
+    let eenv =
+        System.IO.File.AppendAllLines(@"c:\temp\kevin.txt", [| $"realloc: {realloc} : before j: {j}  ===>  {eenv.liveLocals |> Zmap.keys}" |])
+        { eenv with
+            liveLocals = IntMap.add j () eenv.liveLocals
+        }
+    System.IO.File.AppendAllLines(@"c:\temp\kevin.txt", [| $"realloc: {realloc} : after j: {j}  ===>  {eenv.liveLocals |> Zmap.keys}" |])
+    eenv
 
 /// Decide storage for local value and if necessary allocate an ILLocal for it
 and AllocLocalVal cenv cgbuf v eenv repr scopeMarks =
