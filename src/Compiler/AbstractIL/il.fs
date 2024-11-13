@@ -902,7 +902,7 @@ and [<RequireQualifiedAccess; StructuralEquality; StructuralComparison; Structur
         | ILType.Boxed tr -> tr.BasicQualifiedName
         | ILType.Void -> "void"
         | ILType.Ptr _ty -> failwith "unexpected pointer type"
-        | ILType.Byref _ty -> failwith "unexpected byref type"
+        | ILType.Byref _ty -> _ty.ToString()    // failwith "unexpected byref type"
         | ILType.FunctionPointer _mref -> failwith "unexpected function pointer type"
 
     member x.AddQualifiedNameExtension basic =
@@ -958,7 +958,12 @@ and [<RequireQualifiedAccess; StructuralEquality; StructuralComparison; Structur
     [<DebuggerBrowsable(DebuggerBrowsableState.Never)>]
     member x.DebugText = x.ToString()
 
-    override x.ToString() = x.QualifiedName
+    override x.ToString() =
+        match x with
+        | ILType.Ptr _ty -> _ty.ToString() + failwith " - unexpected pointer type"
+        | ILType.Byref _ty -> _ty.ToString() + " - unexpected byref type"
+        | ILType.FunctionPointer _mref -> _mref.ToString() + " - unexpected function pointer type"
+        | _ -> x.QualifiedName
 
 and [<StructuralEquality; StructuralComparison>] ILCallingSignature =
     {

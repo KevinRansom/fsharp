@@ -9832,13 +9832,13 @@ and AllocLocal cenv cgbuf eenv compgen (v, ty, isFixed) (scopeMarks: Mark * Mark
             cgbuf.ReallocLocal(
                 (fun i (_i, ty2, isFixed2) ->
 //                    System.IO.File.AppendAllLines( @"c:\temp\kevin.txt", [| $"i: {i}  ===>  {eenv.liveLocals |> Zmap.keys} = {(IntMap.mem i eenv.liveLocals)}" |])
-                    let result = not isFixed2 && not isFixed && not (IntMap.mem i eenv.liveLocals) && (i < (eenv.liveLocals |> Zmap.keys |> List.length)) && (ty = ty2)
+                    let result = not isFixed2 && not isFixed && not (IntMap.mem i eenv.liveLocals) && (ty = ty2)
                     System.IO.File.AppendAllLines(
                         @"c:\temp\kevin.txt",
                         [|
                             $"-------------------------------------------------------------------"
-                            $"{i} - {_i} - ty {ty.GetType().FullName}"
-                            $"{i} - {_i} - ty2 {ty2.GetType().FullName}"
+                            $"{i} - {_i} - ty ==> {ty.ToString()}"
+                            $"{i} - {_i} - ty2 ==> {ty2.ToString()}"
 //                            $"{isFixed} - {eenv.liveLocals |> Zmap.keys |> List.length }"
 //                            $"not isFixed2 && not isFixed && not (IntMap.mem i eenv.liveLocals) && (ty = ty2)"
 //                            $"{not isFixed2} {not isFixed} {not (IntMap.mem i eenv.liveLocals) && (i < (eenv.liveLocals |> Zmap.keys |> List.length))} && {(ty = ty2)}"
