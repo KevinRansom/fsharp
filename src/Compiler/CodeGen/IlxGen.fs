@@ -574,7 +574,7 @@ type TypeReprEnv(reprs: Map<Stamp, (uint16 * Typar)>, count: int, templateReplac
     member eenv.ForTyconRef(tcref: TyconRef) = eenv.ForTycon tcref.Deref
 
     /// Get a list of the Typars in this environment
-    member eenv.AsTypars() = reprs |> Map.toList |> List.map(fun (_, (_, tp)) -> tp) |> Zset.ofList typarOrder
+    member eenv.AsUserProvidedTypars() = reprs |> Map.toList |> List.map(fun (_, (_, tp)) -> tp) |> List.filter(fun tp -> not tp.IsCompilerGenerated) |> Zset.ofList typarOrder
 
 //--------------------------------------------------------------------------
 // Generate type references
@@ -6924,7 +6924,7 @@ and GetIlxClosureFreeVars cenv m (thisVars: ValRef list) boxity eenv takenNames 
         let ilCloTypeRef = NestedTypeRefForCompLoc eenv.cloc cloName
         let initialFreeTyvars =
             match g.realsig with
-            | true -> { emptyFreeTyvars with FreeTypars = eenv.tyenv.AsTypars() }
+            | true -> { emptyFreeTyvars with FreeTypars = eenv.tyenv.AsUserProvidedTypars() }
             | false -> emptyFreeTyvars
 
         ilCloTypeRef, initialFreeTyvars
