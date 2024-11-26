@@ -196,8 +196,6 @@ module Pass1_DetermineTLRAndArities =
             let arity = Operators.min nFormals nMaxApplied
             if atTopLevel then
                 Some (f, arity)
-            elif g.realsig then
-                None
             else if arity<>0 || not (isNil tps) then
                 Some (f, arity)
             else
@@ -830,7 +828,10 @@ let CreateNewValuesForTLR g tlrS arityM fclassM envPackM =
         let m = f.Range
         let tps, tau = f.GeneralizedType
         let argTys, retTy = stripFunTy g tau
-        let newTps = envp.ep_etps @ tps
+        let newTps =
+            match g.realsig with
+            | true -> tps
+            | false -> envp.ep_etps @ tps
 
         let fHatTy =
             let newArgTys = List.map typeOfVal envp.ep_aenvs @ argTys
@@ -988,11 +989,15 @@ module Pass4_RewriteAssembly =
             let fOrig = ClearValReprInfo fOrig
 
             let fBind =
-                 mkMultiLambdaBind g fOrig letSeqPtOpt m tps vss
-                     (mkApps penv.g
-                         ((exprForVal m fHat, fHat.Type),
-                          [List.map mkTyparTy (envp.ep_etps @ tps)],
-                          aenvExprs @ vsExprs, m), bodyTy)
+                let envTps =
+                    match g.realsig with
+                    | true -> tps
+                    | false -> envp.ep_etps @ tps
+                mkMultiLambdaBind g fOrig letSeqPtOpt m tps vss
+                    (mkApps penv.g
+                        ((exprForVal m fHat, fHat.Type),
+                         [List.map mkTyparTy envTps],
+                         aenvExprs @ vsExprs, m), bodyTy)
             fBind
 
         let fHatNewBinding (shortRecBinds: Bindings) (TBind(f, b, letSeqPtOpt)) =
@@ -1012,7 +1017,10 @@ module Pass4_RewriteAssembly =
             let m = fHat.Range
 
             // Add the type variables to the front
-            let fHat_tps = envp.ep_etps @ tps
+            let fHat_tps =
+                match g.realsig with
+                | true -> tps
+                | false -> envp.ep_etps @ tps
 
             // Add the 'aenv' and original taken variables to the front
             let fHat_args = List.map List.singleton envp.ep_aenvs @ vssTake
@@ -1071,10 +1079,13 @@ module Pass4_RewriteAssembly =
 
                    let f = fvref.Deref
                    (* replace by direct call to corresponding fHat (and additional closure args) *)
-                   let fc = Zmap.force f  penv.fclassM ("TransApp - fc", nameOfVal)
+                   let fc = Zmap.force f penv.fclassM ("TransApp - fc", nameOfVal)
                    let envp = Zmap.force fc penv.envPackM ("TransApp - envp", string)
-                   let fHat = Zmap.force f  penv.fHatM ("TransApp - fHat", nameOfVal)
-                   let tys = (List.map mkTyparTy envp.ep_etps) @ tys
+                   let fHat = Zmap.force f penv.fHatM ("TransApp - fHat", nameOfVal)
+                   let tys =
+                       match penv.g.realsig with
+                       | true -> tys
+                       | false -> (List.map mkTyparTy envp.ep_etps) @ tys
                    let aenvExprs = List.map (exprForVal vm) envp.ep_aenvs
                    let args = aenvExprs @ args
                    mkApps penv.g ((exprForVal vm fHat, fHat.Type), [tys], args, m) (* change, direct fHat call with closure (reqdTypars, aenvs) *)
