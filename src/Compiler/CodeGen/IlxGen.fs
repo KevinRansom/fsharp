@@ -1364,7 +1364,7 @@ let IsValRefIsDllImport g (vref: ValRef) =
 
 /// Determine how a top level value is represented, when it is being represented
 /// as a method.
-let GetMethodSpecForMemberVal cenv (memberInfo: ValMemberInfo) (vref: ValRef) =
+let GetMethodSpecForMemberVal cenv eenv (memberInfo: ValMemberInfo) (vref: ValRef) =
     let g = cenv.g
     let m = vref.Range
     let numEnclosingTypars = CountEnclosingTyparsOfActualParentOfVal vref.Deref
@@ -1373,7 +1373,14 @@ let GetMethodSpecForMemberVal cenv (memberInfo: ValMemberInfo) (vref: ValRef) =
         assert vref.ValReprInfo.IsSome
         GetValReprTypeInCompiledForm g vref.ValReprInfo.Value numEnclosingTypars vref.Type m
 
-    let tyenvUnderTypars = TypeReprEnv.Empty.ForTypars tps
+    //@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+    //let tyenvUnderTypars = TypeReprEnv.Empty.ForTypars tps
+    let tyenvUnderTypars = 
+        match cenv.g.realsig with
+        | true -> eenv.tyenv.Add tps
+        | false -> TypeReprEnv.Empty.ForTypars tps
+    //@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
     let flatArgInfos = List.concat curriedArgInfos
     let isCtor = (memberInfo.MemberFlags.MemberKind = SynMemberKind.Constructor)
     let cctor = (memberInfo.MemberFlags.MemberKind = SynMemberKind.ClassConstructor)
@@ -1529,9 +1536,9 @@ let ComputeStorageForFSharpValue cenv cloc optIntraAssemblyInfo optShadowLocal i
     StaticPropertyWithField(ilFieldSpec, vref, hasLiteralAttr, ilTyForProperty, nm, ilTy, ilGetterMethRef, ilSetterMethRef, optShadowLocal)
 
 /// Compute the representation information for an F#-declared member
-let ComputeStorageForFSharpMember cenv valReprInfo memberInfo (vref: ValRef) m =
+let ComputeStorageForFSharpMember cenv eenv valReprInfo memberInfo (vref: ValRef) m =
     let mspec, mspecW, ctps, mtps, curriedArgInfos, paramInfos, retInfo, witnessInfos, methodArgTys, _ =
-        GetMethodSpecForMemberVal cenv memberInfo vref
+        GetMethodSpecForMemberVal cenv eenv memberInfo vref
 
     Method(valReprInfo, vref, mspec, mspecW, m, ctps, mtps, curriedArgInfos, paramInfos, witnessInfos, methodArgTys, retInfo)
 
@@ -1546,10 +1553,13 @@ let ComputeStorageForFSharpFunctionOrFSharpExtensionMember (cenv: cenv) cloc val
     let tps, witnessInfos, curriedArgInfos, returnTy, retInfo =
         GetValReprTypeInCompiledForm g valReprInfo numEnclosingTypars vref.Type m
 
-    let tyenvUnderTypars =
+    //@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+    let tyenvUnderTypars = 
         match cenv.g.realsig with
         | true -> eenv.tyenv.Add tps
         | false -> TypeReprEnv.Empty.ForTypars tps
+    //@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
     let methodArgTys, paramInfos = curriedArgInfos |> List.concat |> List.unzip
     let ilMethodArgTys = GenParamTypes cenv m tyenvUnderTypars false methodArgTys
     let ilRetTy = GenReturnType cenv m tyenvUnderTypars returnTy
@@ -1621,7 +1631,15 @@ let ComputeStorageForValWithValReprInfo
 
         if vref.Deref.IsCompiledAsStaticPropertyWithoutField then
             let nm = "get_" + nm
-            let tyenvUnderTypars = TypeReprEnv.Empty.ForTypars []
+
+            //@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+            //let tyenvUnderTypars = let tyenvUnderTypars = TypeReprEnv.Empty.ForTypars []
+            let tyenvUnderTypars = 
+                match cenv.g.realsig with
+                | true -> eenv.tyenv.Add []
+                | false -> TypeReprEnv.Empty.ForTypars []
+            //@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
             let ilRetTy = GenType cenv m tyenvUnderTypars vref.Type
             let ty = mkILTyForCompLoc cloc
             let mspec = mkILStaticMethSpecInTy (ty, nm, [], ilRetTy, [])
