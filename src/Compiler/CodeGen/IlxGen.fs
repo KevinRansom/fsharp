@@ -518,11 +518,17 @@ let ComputeTypeAccess (tref: ILTypeRef) hidden (accessibility: Accessibility) re
 //--------------------------------------------------------------------------
 // TypeReprEnv
 //--------------------------------------------------------------------------
+let fst3 (a,_,_) = a
+
+[<RequireQualifiedAccess>]
+type TyparType =
+| TypeGenericArgument = 0
+| MemberGenericArgument = 1
 
 /// Indicates how type parameters are mapped to IL type variables
 [<NoEquality; NoComparison>]
 type TypeReprEnv
-    (reprs: Map<Stamp, (uint16 * Typar)>, count: int, templateReplacement: (TyconRef * ILTypeRef * Typars * TyparInstantiation) option) =
+    (reprs: Map<Stamp, (uint16 * Typar * TyparType)>, count: int, templateReplacement: (TyconRef * ILTypeRef * Typars * TyparInstantiation) option) =
 
     static let empty = TypeReprEnv(count = 0, reprs = Map.empty, templateReplacement = None)
 
@@ -537,7 +543,7 @@ type TypeReprEnv
     /// Lookup a type parameter
     member _.Item(tp: Typar, m: range) =
         try
-            reprs[tp.Stamp] |> fst
+            reprs[tp.Stamp] |> fst3
         with :? KeyNotFoundException ->
             errorR (InternalError("Undefined or unsolved type variable: " + showL (typarL tp), m))
             // Random value for post-hoc diagnostic analysis on generated tree *
@@ -545,15 +551,21 @@ type TypeReprEnv
 
     /// Add an additional type parameter to the environment. If the parameter is a units-of-measure parameter
     /// then it is ignored, since it doesn't correspond to a .NET type parameter.
-    member tyenv.AddOne(tp: Typar) =
+    member tyenv.AddOneWithTyparType(tp: Typar, tt: TyparType) =
         if IsNonErasedTypar tp then
-            TypeReprEnv(reprs.Add(tp.Stamp, (uint16 count, tp)), count + 1, templateReplacement)
+            TypeReprEnv(reprs.Add(tp.Stamp, (uint16 count, tp, tt)), count + 1, templateReplacement)
         else
             tyenv
 
+    member tyenv.AddOne(tp: Typar) = tyenv.AddOneWithTyparType(tp, TyparType.TypeGenericArgument)
+
     /// Add multiple additional type parameters to the environment.
-    member tyenv.Add tps =
-        (tyenv, tps) ||> List.fold (fun tyenv tp -> tyenv.AddOne tp)
+    member tyenv.AddWithTyparType (tps, tt: TyparType) =
+        (tyenv, tps) ||> List.fold (fun tyenv tp -> tyenv.AddOneWithTyparType(tp, tt))
+
+    member tyenv.AddWithTypeGenericArgument tps = tyenv.AddWithTyparType(tps, TyparType.TypeGenericArgument)
+
+    member tyenv.AddWithMemberGenericArgument tps = tyenv.AddWithTyparType(tps, TyparType.MemberGenericArgument)
 
     /// Get the count of the non-erased type parameters in scope.
     member _.Count = count
@@ -566,7 +578,7 @@ type TypeReprEnv
         TypeReprEnv(count = 0, reprs = Map.empty, templateReplacement = eenv.TemplateReplacement)
 
     /// Get the environment for a fixed set of type parameters
-    member eenv.ForTypars tps = eenv.ResetTypars().Add tps
+    member eenv.ForTypars tps = eenv.ResetTypars().AddWithTypeGenericArgument tps
 
     /// Get the environment for within a type definition
     member eenv.ForTycon(tycon: Tycon) = eenv.ForTypars tycon.TyparsNoRange
@@ -578,7 +590,7 @@ type TypeReprEnv
     member eenv.AsUserProvidedTypars() =
         reprs
         |> Map.toList
-        |> List.map (fun (_, (_, tp)) -> tp)
+        |> List.map (fun (_, (_, tp, _)) -> tp)
         |> List.filter (fun tp -> not tp.IsCompilerGenerated)
         |> Zset.ofList typarOrder
 
@@ -1261,9 +1273,14 @@ let AddEnclosingToEnv eenv enclosing name ns =
             }
     }
 
-let AddTyparsToEnv typars (eenv: IlxGenEnv) =
+let AddTyparsWithTypeGenericArgumentToEnv typars (eenv: IlxGenEnv) =
     { eenv with
-        tyenv = eenv.tyenv.Add typars
+        tyenv = eenv.tyenv.AddWithTypeGenericArgument typars
+    }
+
+let AddTyparsWithMemberGenericArgumentToEnv typars (eenv: IlxGenEnv) =
+    { eenv with
+        tyenv = eenv.tyenv.AddWithMemberGenericArgument typars
     }
 
 let AddSignatureRemapInfo _msg (rpi, mhi) eenv =
@@ -1375,11 +1392,11 @@ let GetMethodSpecForMemberVal cenv eenv (memberInfo: ValMemberInfo) (vref: ValRe
 
     //@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
     //let tyenvUnderTypars = TypeReprEnv.Empty.ForTypars tps
-    let tyenvUnderTypars = 
+    let tyenvUnderTypars =
         match cenv.g.realsig with
-        | true -> eenv.tyenv.Add tps
+        | true -> eenv.tyenv.AddWithTypeGenericArgument tps
         | false -> TypeReprEnv.Empty.ForTypars tps
-    //@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+    //@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 
     let flatArgInfos = List.concat curriedArgInfos
     let isCtor = (memberInfo.MemberFlags.MemberKind = SynMemberKind.Constructor)
@@ -1545,7 +1562,7 @@ let ComputeStorageForFSharpMember cenv eenv valReprInfo memberInfo (vref: ValRef
 /// Compute the representation information for an F#-declared function in a module or an F#-declared extension member.
 /// Note, there is considerable overlap with ComputeStorageForFSharpMember/GetMethodSpecForMemberVal and these could be
 /// rationalized.
-let ComputeStorageForFSharpFunctionOrFSharpExtensionMember (cenv: cenv) cloc valReprInfo (vref: ValRef) m (eenv: IlxGenEnv) =
+let ComputeStorageForFSharpFunctionOrFSharpExtensionMember (cenv: cenv) (eenv: IlxGenEnv) cloc valReprInfo (vref: ValRef) m =
     let g = cenv.g
     let nm = vref.CompiledName g.CompilerGlobalState
     let numEnclosingTypars = CountEnclosingTyparsOfActualParentOfVal vref.Deref
@@ -1556,7 +1573,7 @@ let ComputeStorageForFSharpFunctionOrFSharpExtensionMember (cenv: cenv) cloc val
     //@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
     let tyenvUnderTypars = 
         match cenv.g.realsig with
-        | true -> eenv.tyenv.Add tps
+        | true -> eenv.tyenv.AddWithTypeGenericArgument tps
         | false -> TypeReprEnv.Empty.ForTypars tps
     //@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 
@@ -1636,7 +1653,7 @@ let ComputeStorageForValWithValReprInfo
             //let tyenvUnderTypars = let tyenvUnderTypars = TypeReprEnv.Empty.ForTypars []
             let tyenvUnderTypars = 
                 match cenv.g.realsig with
-                | true -> eenv.tyenv.Add []
+                | true -> eenv.tyenv.AddWithTypeGenericArgument []
                 | false -> TypeReprEnv.Empty.ForTypars []
             //@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 
@@ -1656,8 +1673,8 @@ let ComputeStorageForValWithValReprInfo
                 ComputeStorageForFSharpValue cenv cloc optIntraAssemblyInfo optShadowLocal isInteractive returnTy vref m
             | _ ->
                 match vref.MemberInfo with
-                | Some memberInfo when not vref.IsExtensionMember -> ComputeStorageForFSharpMember cenv valReprInfo memberInfo vref m
-                | _ -> ComputeStorageForFSharpFunctionOrFSharpExtensionMember cenv cloc valReprInfo vref m eenv
+                | Some memberInfo when not vref.IsExtensionMember -> ComputeStorageForFSharpMember cenv eenv valReprInfo memberInfo vref m
+                | _ -> ComputeStorageForFSharpFunctionOrFSharpExtensionMember cenv eenv cloc valReprInfo vref m
 
 /// Determine how an F#-declared value, function or member is represented, if it is in the assembly being compiled.
 let ComputeAndAddStorageForLocalValWithValReprInfo (cenv, intraAssemblyFieldTable, isInteractive, optShadowLocal) cloc (v: Val) eenv =
@@ -4623,7 +4640,7 @@ and GenNamedLocalTyFuncCall cenv (cgbuf: CodeGenBuffer) eenv ty cloinfo tyargs m
             | Expr.TyLambda(_, tvs, _, _, _) -> tvs
             | _ -> []
 
-        let eenvinner = AddTyparsToEnv directTypars eenvinner
+        let eenvinner = AddTyparsWithTypeGenericArgumentToEnv directTypars eenvinner
 
         let ilDirectGenericParams = GenGenericParams cenv eenvinner directTypars
 
@@ -4670,7 +4687,7 @@ and GenIndirectCall cenv cgbuf eenv (funcTy, tyargs, curriedArgs, m) sequel =
 
         let typars, formalFuncTy = tryDestForallTy g funcTy
 
-        let feenv = eenv.tyenv.Add typars
+        let feenv = eenv.tyenv.AddWithTypeGenericArgument typars
 
         // This does two phases: REVIEW: the code is too complex for what it's achieving and should be rewritten
         let formalRetTy, appBuilder =
@@ -5893,7 +5910,7 @@ and GenMethodImpl cenv eenv (useMethodImpl, slotsig) m isInstance =
 
     nameOfOverridingMethod,
     (fun (ilTyForOverriding, methTyparsOfOverridingMethod) ->
-        let eenvForOverrideBy = AddTyparsToEnv methTyparsOfOverridingMethod eenv
+        let eenvForOverrideBy = AddTyparsWithTypeGenericArgumentToEnv methTyparsOfOverridingMethod eenv
 
         let ilParamsOfOverridingMethod, ilReturnOfOverridingMethod =
             GenActualSlotsig m cenv eenvForOverrideBy slotsig methTyparsOfOverridingMethod []
@@ -5957,7 +5974,7 @@ and GenObjectExprMethod cenv eenvinner (cgbuf: CodeGenBuffer) useMethodImpl tmet
     if CompileAsEvent g attribs then
         []
     else
-        let eenvUnderTypars = AddTyparsToEnv methTyparsOfOverridingMethod eenvinner
+        let eenvUnderTypars = AddTyparsWithTypeGenericArgumentToEnv methTyparsOfOverridingMethod eenvinner
         let methParams = List.concat methParams
 
         // drop the 'this' arg when computing better argument names for IL parameters
@@ -7098,7 +7115,7 @@ and GetIlxClosureInfo cenv m boxity isLocalTypeFunc canUseStaticField thisVars e
     let rec getClosureArgs eenv numArgs tvsl (vs: Val list) =
         match tvsl, vs with
         | tvs :: rest, _ ->
-            let eenv = AddTyparsToEnv tvs eenv
+            let eenv = AddTyparsWithTypeGenericArgumentToEnv tvs eenv
             let l, eenv = getClosureArgs eenv numArgs rest vs
 
             let lambdas =
@@ -7198,7 +7215,7 @@ and GenDelegateExpr cenv cgbuf eenvouter expr (TObjExprMethod(slotsig, _attribs,
     let delegeeMethName = "Invoke"
     let ilDelegeeTyInner = mkILBoxedTy ilDelegeeTypeRef ilDelegeeGenericActualsInner
 
-    let envForDelegeeUnderTypars = AddTyparsToEnv methTyparsOfOverridingMethod eenvinner
+    let envForDelegeeUnderTypars = AddTyparsWithTypeGenericArgumentToEnv methTyparsOfOverridingMethod eenvinner
 
     let numthis = if useStaticClosure then 0 else 1
 
@@ -9222,11 +9239,14 @@ and GenMethodForBinding
 
     // The type parameters of the method's type are different to the type parameters
     // for the big lambda ("tlambda") of the implementation of the method.
+    //@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
     let eenvUnderMethLambdaTypars = 
         match g.realsig with
-        | true -> AddTyparsToEnv methLambdaTypars eenv
+        | true -> AddTyparsWithMemberGenericArgumentToEnv methLambdaTypars eenv
         | false -> EnvForTypars methLambdaTypars eenv
-    let eenvUnderMethTypeTypars = AddTyparsToEnv mtps (EnvForTypars ctps eenv)
+    //@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
+    let eenvUnderMethTypeTypars = AddTyparsWithTypeGenericArgumentToEnv mtps (EnvForTypars ctps eenv)
 
     // Add the arguments to the environment. We add an implicit 'this' argument to constructors
     let isCtor = v.IsConstructor
@@ -10124,7 +10144,7 @@ and GenAttr cenv g eenv (Attrib(_, k, args, props, _, _, _)) =
             assert vref.IsMember
 
             let mspec, _, _, _, _, _, _, _, _, _ =
-                GetMethodSpecForMemberVal cenv (Option.get vref.MemberInfo) vref
+                GetMethodSpecForMemberVal cenv eenv (Option.get vref.MemberInfo) vref
 
             mspec
 
@@ -10709,7 +10729,7 @@ and GenAbstractBinding cenv eenv tref (vref: ValRef) =
 
     if memberInfo.MemberFlags.IsDispatchSlot && not memberInfo.IsImplemented then
         let mspec, _mspecW, ctps, mtps, _curriedArgInfos, argInfos, retInfo, witnessInfos, methArgTys, returnTy =
-            GetMethodSpecForMemberVal cenv memberInfo vref
+            GetMethodSpecForMemberVal cenv eenv memberInfo vref
 
         let ilAttrs =
             [
