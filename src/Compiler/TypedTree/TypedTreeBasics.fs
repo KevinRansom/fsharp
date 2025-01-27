@@ -199,13 +199,17 @@ let mkTyparTy (tp:Typar) =
 let copyTypar clearStaticReq (tp: Typar) =
     let optData = tp.typar_opt_data |> Option.map (fun tg -> { typar_il_name = tg.typar_il_name; typar_xmldoc = tg.typar_xmldoc; typar_constraints = tg.typar_constraints; typar_attribs = tg.typar_attribs; typar_is_contravariant = tg.typar_is_contravariant  })
     let flags = if clearStaticReq then tp.typar_flags.WithStaticReq(TyparStaticReq.None) else tp.typar_flags
-    Typar.New { typar_id = tp.typar_id
-                typar_flags = flags
-                typar_stamp = newStamp()
-                typar_solution = tp.typar_solution
-                typar_astype = Unchecked.defaultof<_>
-                // Be careful to clone the mutable optional data too
-                typar_opt_data = optData } 
+    let result =
+        Typar.New {
+            typar_id = tp.typar_id
+            typar_flags = flags
+            typar_stamp = newStamp()
+            typar_solution = tp.typar_solution
+            typar_astype = Unchecked.defaultof<_>
+            // Be careful to clone the mutable optional data too
+            typar_opt_data = optData }
+    System.IO.File.AppendAllLines(@"c:\temp\output.txt", [| $"copyTypar: tp: {tp.Name} - {tp.Stamp}   ===> result: {result.Name} - {result.Stamp}" |])
+    result
 
 let copyTypars clearStaticReq tps = List.map (copyTypar clearStaticReq) tps
 
