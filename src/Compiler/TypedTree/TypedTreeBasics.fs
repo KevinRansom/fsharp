@@ -346,7 +346,7 @@ let (|AbbrevOrAppTy|_|) (ty: TType) =
 // the item is globally stable ("published") or not.
 //---------------------------------------------------------------------------
 
-let mkLocalValRef (v: Val) = VRefLocal v
+let mkLocalValRef (v: Val) = let _haseclaringEntity = v.HasDeclaringEntity in VRefLocal v
 let mkLocalModuleRef (v: ModuleOrNamespace) = ERefLocal v
 let mkLocalEntityRef (v: Entity) = ERefLocal v
 

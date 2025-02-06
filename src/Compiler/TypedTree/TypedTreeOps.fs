@@ -1371,7 +1371,10 @@ let rebuildLambda m ctorThisValOpt baseValOpt vs (body, bodyTy) = Expr.Lambda (n
 
 let mkLambda m v (body, bodyTy) = mkMultiLambda m [v] (body, bodyTy)
 
-let mkTypeLambda m vs (body, bodyTy) = match vs with [] -> body | _ -> Expr.TyLambda (newUnique(), vs, body, m, bodyTy)
+let mkTypeLambda m vs (body, bodyTy) =
+    let _m = m.ToString()
+    let result = match vs with [] -> body | _ -> Expr.TyLambda (newUnique(), vs, body, m, bodyTy)
+    result
 
 let mkTypeChoose m vs body = match vs with [] -> body | _ -> Expr.TyChoose (vs, body, m)
 

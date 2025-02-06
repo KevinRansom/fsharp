@@ -196,8 +196,8 @@ module Pass1_DetermineTLRAndArities =
             let arity = Operators.min nFormals nMaxApplied
             if atTopLevel then
                 Some (f, arity)
-            elif g.realsig then
-                None
+            //elif g.realsig then
+            //    None
             else if arity<>0 || not (isNil tps) then
                 Some (f, arity)
             else
@@ -1116,7 +1116,7 @@ module Pass4_RewriteAssembly =
            let expr = TransApp penv (f, fty, tys, args, m)
            expr, z
 
-        | Expr.Val (v, _, m) ->
+        | Expr.Val (v, _a, m) ->
            // consider this a trivial app
            let fx, fty = expr, v.Type
            let expr = TransApp penv (fx, fty, [], [], m)
@@ -1139,14 +1139,14 @@ module Pass4_RewriteAssembly =
             MakePreDecs m pds expr, z (* if TopLevel, lift preDecs over the ilobj expr *)
 
         // lambda, tlambda - explicit lambda terms
-        | Expr.Lambda (_, ctorThisValOpt, baseValOpt, argvs, body, m, bodyTy) ->
+        | Expr.Lambda (_a, ctorThisValOpt, baseValOpt, argvs, body, m, bodyTy) ->
             let z = EnterInner z
             let body, z = TransExpr penv z body
             let z = ExitInner z
             let pds, z = ExtractPreDecs z
             MakePreDecs m pds (rebuildLambda m ctorThisValOpt baseValOpt argvs (body, bodyTy)), z
 
-        | Expr.TyLambda (_, tps, body, m, bodyTy) ->
+        | Expr.TyLambda (_a, tps, body, m, bodyTy) ->
             let z = EnterInner z
             let body, z = TransExpr penv z body
             let z = ExitInner z
@@ -1270,8 +1270,8 @@ module Pass4_RewriteAssembly =
 
     and TransBindingRhs penv z (TBind(v, e, letSeqPtOpt)) : Binding * RewriteState =
         let shouldInline = v.ShouldInline
-        let z, e = EnterShouldInline shouldInline z (fun z -> TransExpr penv z e)
-        TBind (v, e, letSeqPtOpt), z
+        let z, e1 = EnterShouldInline shouldInline z (fun z -> TransExpr penv z e)
+        TBind (v, e1, letSeqPtOpt), z
 
     and TransDecisionTree penv z x: DecisionTree * RewriteState =
        match x with

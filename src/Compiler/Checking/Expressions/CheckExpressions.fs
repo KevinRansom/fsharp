@@ -12156,7 +12156,7 @@ and AnalyzeAndMakeAndPublishRecursiveValue
         (cenv: cenv)
         (env: TcEnv)
         (tpenv, recBindIdx)
-        (NormalizedRecBindingDefn(containerInfo, newslotsOK, declKind, binding)) =
+        (NormalizedRecBindingDefn(containerInfo, newslotsOK, declKind, binding) as normalizedRecBindingDefn) =
 
     let g = cenv.g
 

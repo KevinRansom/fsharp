@@ -363,13 +363,10 @@ let useCallVirt (cenv: cenv) boxity (mspec: ILMethodSpec) isBaseCall =
 type CompileLocation =
     {
         Scope: ILScopeRef
-
         TopImplQualifiedName: string
-
         Namespace: string option
-
         Enclosing: string list
-
+        GenericParams: ILType list
         QualifiedNameOfFile: string
     }
 
@@ -391,6 +388,7 @@ let CompLocForFragment fragName (ccu: CcuThunk) =
         Scope = ccu.ILScopeRef
         Namespace = None
         Enclosing = []
+        GenericParams = []
     }
 
 let CompLocForCcu (ccu: CcuThunk) = CompLocForFragment ccu.AssemblyName ccu
@@ -428,6 +426,7 @@ let CompLocForFixedPath fragName qname (CompPath(sref, _, cpath)) =
         Scope = sref
         Namespace = ns
         Enclosing = encl
+        GenericParams = []
     }
 
 let CompLocForFixedModule fragName qname (mspec: ModuleOrNamespace) =
@@ -486,8 +485,8 @@ let TypeRefForCompLoc cloc =
         NestedTypeRefForCompLoc { cloc with Enclosing = encl } n
 
 /// Compute an ILType for a CompilationLocation for a non-generic type
-let mkILTyForCompLoc cloc =
-    mkILNonGenericBoxedTy (TypeRefForCompLoc cloc)
+let mkILTyForCompLoc (cloc: CompileLocation) =
+    mkILNamedTy AsObject (TypeRefForCompLoc cloc) cloc.GenericParams
 
 /// Compute visibility for type members
 /// based on hidden and accessibility from the source code
@@ -1252,12 +1251,13 @@ let EnvForTycon tps eenv =
         tyenv = eenv.tyenv.ForTycon tps
     }
 
-let AddEnclosingToEnv eenv enclosing name ns =
+let AddEnclosingToEnv eenv (tref: ILTypeRef) genericParams =
     { eenv with
         cloc =
             { eenv.cloc with
-                Enclosing = enclosing @ [ name ]
-                Namespace = ns
+                Enclosing = tref.Enclosing @ [ tref.Name ]
+                Namespace = None
+                GenericParams = genericParams
             }
     }
 
@@ -1550,11 +1550,9 @@ let ComputeStorageForFSharpFunctionOrFSharpExtensionMember (cenv: cenv) cloc val
     let methodArgTys, paramInfos = curriedArgInfos |> List.concat |> List.unzip
     let ilMethodArgTys = GenParamTypes cenv m tyenvUnderTypars false methodArgTys
     let ilRetTy = GenReturnType cenv m tyenvUnderTypars returnTy
-    let ilLocTy = mkILTyForCompLoc cloc
+    let ilLocTy = mkILTyForCompLoc cloc                                                     //@@@@@@@@@@@@@@@@@@@@@@@@@@@@ Here is the root of the problem
     let ilMethodInst = GenTypeArgs cenv m tyenvUnderTypars (List.map mkTyparTy tps)
-
-    let mspec =
-        mkILStaticMethSpecInTy (ilLocTy, nm, ilMethodArgTys, ilRetTy, ilMethodInst)
+    let mspec = mkILStaticMethSpecInTy (ilLocTy, nm, ilMethodArgTys, ilRetTy, ilMethodInst)
 
     let mspecW =
         if not g.generateWitnesses || witnessInfos.IsEmpty then
@@ -1565,7 +1563,9 @@ let ComputeStorageForFSharpFunctionOrFSharpExtensionMember (cenv: cenv) cloc val
 
             mkILStaticMethSpecInTy (ilLocTy, ExtraWitnessMethodName nm, (ilWitnessArgTys @ ilMethodArgTys), ilRetTy, ilMethodInst)
 
-    Method(valReprInfo, vref, mspec, mspecW, m, [], tps, curriedArgInfos, paramInfos, witnessInfos, methodArgTys, retInfo)
+    let front, back = tps[..1], tps[2..]
+
+    Method(valReprInfo, vref, mspec, mspecW, m, front, back, curriedArgInfos, paramInfos, witnessInfos, methodArgTys, retInfo)
 
 /// Determine if an F#-declared value, method or function is compiled as a method.
 let IsFSharpValCompiledAsMethod g (v: Val) =
@@ -1639,9 +1639,7 @@ let ComputeStorageForValWithValReprInfo
 
 /// Determine how an F#-declared value, function or member is represented, if it is in the assembly being compiled.
 let ComputeAndAddStorageForLocalValWithValReprInfo (cenv, intraAssemblyFieldTable, isInteractive, optShadowLocal) cloc (v: Val) eenv =
-    let storage =
-        ComputeStorageForValWithValReprInfo(cenv, Some intraAssemblyFieldTable, isInteractive, optShadowLocal, mkLocalValRef v, cloc)
-
+    let storage = ComputeStorageForValWithValReprInfo(cenv, Some intraAssemblyFieldTable, isInteractive, optShadowLocal, mkLocalValRef v, cloc)
     AddStorageForVal cenv.g (v, notlazy storage) eenv
 
 /// Determine how an F#-declared value, function or member is represented, if it is an external assembly.
@@ -4326,7 +4324,7 @@ and GenApp (cenv: cenv) cgbuf eenv (f, fty, tyargs, curriedArgs, m) sequel =
                 List.splitAt numEnclILTypeArgs ilTyArgs
 
             let boxity = mspec.DeclaringType.Boxity
-            let mspec = mkILMethSpec (mspec.MethodRef, boxity, ilEnclArgTys, ilMethArgTys)
+            let mspec = mkILMethSpec (mspec.MethodRef, boxity, ilEnclArgTys, ilMethArgTys)                  //@@@@@@@@@@@  and here
 
             // "Unit" return types on static methods become "void"
             let mustGenerateUnitAfterCall = Option.isNone returnTy
@@ -4374,7 +4372,7 @@ and GenApp (cenv: cenv) cgbuf eenv (f, fty, tyargs, curriedArgs, m) sequel =
                 | _ ->
                     if newobj then I_newobj(mspec, None)
                     elif useICallVirt then I_callvirt(isTailCall, mspec, None)
-                    else I_call(isTailCall, mspec, None)
+                    else I_call(isTailCall, mspec, None)                                    //@@@@@@@@@
 
             // ok, now we're ready to generate
             if isSuperInit || isSelfInit then
@@ -8200,7 +8198,7 @@ and GenLetRecFixup cenv cgbuf eenv (ilxCloSpec: IlxClosureSpec, e, ilField: ILFi
     CG.EmitInstr cgbuf (pop 2) Push0 (mkNormalStfld (mkILFieldSpec (ilField.FieldRef, ilxCloSpec.ILType)))
 
 /// Generate letrec bindings
-and GenLetRecBindings cenv (cgbuf: CodeGenBuffer) eenv (allBinds: Bindings, m) (dict: Dictionary<Stamp, ILTypeRef> option) =
+and GenLetRecBindings cenv (cgbuf: CodeGenBuffer) eenv (allBinds: Bindings, m) (dict: Dictionary<Stamp, ILTypeRef * ILType list> option) =
 
     // 'let rec' bindings are always considered to be in loops, that is each may have backward branches for the
     // tailcalls back to the entry point. This means we don't rely on zero-init of mutable locals
@@ -8354,11 +8352,11 @@ and GenLetRecBindings cenv (cgbuf: CodeGenBuffer) eenv (allBinds: Bindings, m) (
                     ||> List.fold (fun forwardReferenceSet (bind: Binding) ->
                         GenBinding cenv cgbuf eenv bind false
                         updateForwardReferenceSet bind forwardReferenceSet)
-                | true, tref ->
+                | true, (tref, typars) ->
                     CodeGenInitMethod
                         cenv
                         cgbuf
-                        (AddEnclosingToEnv eenv tref.Enclosing tref.Name None)
+                        (AddEnclosingToEnv eenv tref typars)
                         tref
                         (fun cgbuf eenv ->
                             // Generate chunks of non-nested bindings together to allow recursive fixups.
@@ -10287,7 +10285,7 @@ and GenModuleOrNamespaceContents cenv (cgbuf: CodeGenBuffer) qname lazyInitInfo 
     | TMDefRec(_isRec, opens, tycons, mbinds, m) ->
         let eenvinner = AddDebugImportsToEnv cenv eenv opens
 
-        let dict = Some(Dictionary<Stamp, ILTypeRef>())
+        let dict = Some(Dictionary<Stamp, ILTypeRef * ILType list>())
 
         for tc in tycons do
             let optTref =
@@ -10853,7 +10851,7 @@ and GenPrintingMethod cenv eenv methName ilThisTy m =
             | _ -> ()
     ]
 
-and GenTypeDef cenv mgbuf lazyInitInfo eenv m (tycon: Tycon) : ILTypeRef option =
+and GenTypeDef cenv mgbuf lazyInitInfo eenv m (tycon: Tycon): (ILTypeRef * ILType list) option =
     let g = cenv.g
     let tcref = mkLocalTyconRef tycon
 
@@ -11811,10 +11809,10 @@ and GenTypeDef cenv mgbuf lazyInitInfo eenv m (tycon: Tycon) : ILTypeRef option 
             then
                 GenForceWholeFileInitializationAsPartOfCCtor cenv mgbuf lazyInitInfo tref eenv.imports m
 
-            Some tref
+            Some (tref, ilThisTy.GenericArgs)
 
 /// Generate the type for an F# exception declaration.
-and GenExnDef cenv mgbuf eenv m (exnc: Tycon) : ILTypeRef option =
+and GenExnDef cenv mgbuf eenv m (exnc: Tycon): (ILTypeRef * ILType list) option =
     let g = cenv.g
     let exncref = mkLocalEntityRef exnc
 
@@ -11972,7 +11970,7 @@ and GenExnDef cenv mgbuf eenv m (exnc: Tycon) : ILTypeRef option =
 
         let tdef = tdef.WithSerializable(true)
         mgbuf.AddTypeDef(tref, tdef, false, false, None)
-        Some tref
+        Some (tref, [])
 
 let CodegenAssembly cenv eenv mgbuf implFiles =
     match List.tryFrontAndBack implFiles with

@@ -630,9 +630,9 @@ type EntityOptionalData =
 [<NoEquality; NoComparison; RequireQualifiedAccess; StructuredFormatDisplay("{DebugText}")>] 
 type Entity = 
     {
-      /// The declared type parameters of the type  
+      /// The declared type parameters of the type
       // MUTABILITY; used only during creation and remapping of tycons 
-      mutable entity_typars: LazyWithContext<Typars, range>        
+      mutable entity_typars: LazyWithContext<Typars, range>
       
       mutable entity_flags: EntityFlags
       
