@@ -76,3 +76,11 @@ let mutable private stampCount = 0L
 let newStamp() =
     let stamp = System.Threading.Interlocked.Increment &stampCount
     stamp
+
+///@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+/// Remove before merge: Diagnostics only, Unique name generator for stamps attached to to val_specs, tycon_specs etc.
+/// Concurrency-safe
+let mutable private bindingStampCount = 0L
+let newBindingStampCount () =
+    let bindingStamp = System.Threading.Interlocked.Increment &bindingStampCount
+    bindingStamp

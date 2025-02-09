@@ -703,8 +703,8 @@ let IsPartialExpr cenv env m x =
         match x with
         | Expr.App (func, _, _, args, _) -> func :: args |> Seq.exists isPartialExpression
         | Expr.Lambda (_, _, _, _, expr, _, _) -> expr |> isPartialExpression 
-        | Expr.Let (TBind (_,expr,_), body, _, _) -> expr :: [body] |> List.exists isPartialExpression
-        | Expr.LetRec (bindings, body, _, _) -> body :: (bindings |> List.map (fun (TBind (_,expr,_)) -> expr)) |> List.exists isPartialExpression
+        | Expr.Let (TBind (_newBindingStampCount, _,expr,_), body, _, _) -> expr :: [body] |> List.exists isPartialExpression
+        | Expr.LetRec (bindings, body, _, _) -> body :: (bindings |> List.map (fun (TBind (_newBindingStampCount, _,expr,_)) -> expr)) |> List.exists isPartialExpression
         | Expr.Sequential (expr1, expr2, _, _) -> [expr1; expr2] |> Seq.exists isPartialExpression
         | Expr.Val (vr, _, _) when not vr.IsLocalRef -> ((GetInfoForVal cenv env m vr).ValExprInfo) |> IsPartialExprVal
         | _ -> false
@@ -1688,7 +1688,7 @@ and OpHasEffect g m op =
 let TryEliminateBinding cenv _env bind e2 _m =
     let g = cenv.g
 
-    let (TBind(vspec1, e1, spBind)) = bind
+    let (TBind(_newBindingStampCount, vspec1, e1, spBind)) = bind
     // don't eliminate bindings if we're not optimizing AND the binding is not a compiler generated variable
     if not (cenv.optimizing && cenv.settings.EliminateImmediatelyConsumedLocals()) && 
        not vspec1.IsCompilerGenerated then 
@@ -1908,7 +1908,7 @@ let ExpandStructuralBindingRaw cenv expr =
     assert cenv.settings.ExpandStructuralValues()
 
     match expr with
-    | Expr.Let (TBind(v, rhs, tgtSeqPtOpt), body, m, _) 
+    | Expr.Let (TBind(_newBindingStampCount, v, rhs, tgtSeqPtOpt), body, m, _) 
         when (isRefTupleExpr rhs &&
               CanExpandStructuralBinding v) ->
           let args = tryDestRefTupleExpr rhs
@@ -2028,7 +2028,7 @@ let TryRewriteBranchingTupleBinding g (v: Val) rhs tgtSeqPtOpt body m =
         let argTys = destRefTupleTy g v.Type
         let inits = argTys |> List.map (mkNull m)
         let ves, binds = List.mapi2 (MakeMutableStructuralBindingForTupleElement v) inits argTys |> List.unzip
-        let vrefs = binds |> List.map (fun (TBind (v, _, _)) -> mkLocalValRef v)
+        let vrefs = binds |> List.map (fun (TBind (_newBindingStampCount, v, _, _)) -> mkLocalValRef v)
         argTys, ves, binds, vrefs)
 
     match dive g m requisites rhs with
@@ -2044,7 +2044,7 @@ let ExpandStructuralBinding cenv expr =
     assert cenv.settings.ExpandStructuralValues()
 
     match expr with
-    | Expr.Let (TBind(v, rhs, tgtSeqPtOpt), body, m, _)
+    | Expr.Let (TBind(_newBindingStampCount, v, rhs, tgtSeqPtOpt), body, m, _)
         when (isRefTupleTy g v.Type &&
               not (isRefTupleExpr rhs) &&
               CanExpandStructuralBinding v) ->
@@ -2061,7 +2061,7 @@ let ExpandStructuralBinding cenv expr =
 
     // Expand 'let v = Some arg in ...' to 'let tmp = arg in let v = Some tp in ...'
     // Used to give names to values of optional arguments prior as we inline.
-    | Expr.Let (TBind(v, Expr.Op(TOp.UnionCase uc, _, [arg], _), tgtSeqPtOpt), body, m, _)
+    | Expr.Let (TBind(_newBindingStampCount, v, Expr.Op(TOp.UnionCase uc, _, [arg], _), tgtSeqPtOpt), body, m, _)
         when isOptionTy g v.Type && 
              not (ExprIsValue arg) && 
              g.unionCaseRefEq uc (mkSomeCase g) &&
@@ -3821,7 +3821,7 @@ and OptimizeLambdas (vspec: Val option) cenv env valReprInfo expr exprTy =
         let env = BindTyparsToUnknown tps env
         let env = List.foldBack (BindInternalValsToUnknown cenv) vsl env
         let bodyR, bodyinfo = OptimizeExpr cenv env body
-        let exprR = mkMemberLambdas g m tps ctorThisValOpt baseValOpt vsl (bodyR, bodyTy)
+        let exprR = mkMemberLambdas g m tps ctorThisValOpt baseValOpt vsl (bodyR, bodyTy)               //@@@@@@@@@@@@@@@@@  Hererere !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         let arities = vsl.Length
         let arities = if isNil tps then arities else 1+arities
         let bsize = bodyinfo.TotalSize
@@ -4104,7 +4104,7 @@ and OptimizeSwitchFallback cenv env (eR, einfo, cases, dflt, m) =
     let info = { info with TotalSize = info.TotalSize + size; FunctionSize = info.FunctionSize + size; }
     TDSwitch (eR, casesR, dfltR, m), info
 
-and OptimizeBinding cenv isRec env (TBind(vref, expr, spBind)) =
+and OptimizeBinding cenv isRec env (TBind(_newBindingStampCount, vref, expr, spBind)) =
     let g = cenv.g
     try 
         
@@ -4204,7 +4204,7 @@ and OptimizeBinding cenv isRec env (TBind(vref, expr, spBind)) =
             errorR(InternalError("the inline value '"+vref.LogicalName+"' was not inferred to have a known value", vref.Range))
         
         let env = BindInternalLocalVal cenv vref (mkValInfo einfo vref) env 
-        (TBind(vref, exprOptimized, spBind), einfo), env
+        (TBind(newBindingStampCount(), vref, exprOptimized, spBind), einfo), env
     with RecoverableException exn -> 
         errorRecovery exn vref.Range 
         raise (ReportedError (Some exn))

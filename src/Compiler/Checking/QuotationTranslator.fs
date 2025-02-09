@@ -191,8 +191,8 @@ let (|SimpleArrayLoopUpperBound|_|) expr =
 [<return: Struct>]
 let (|SimpleArrayLoopBody|_|) g expr =
     match expr with
-    | Expr.Lambda (_, a, b, ([_] as args), DebugPoints (Expr.Let (TBind(forVarLoop, DebugPoints (Expr.Op (TOp.ILAsm ([I_ldelem_any(ILArrayShape [(Some 0, None)], _)], _), [elemTy], [arr; idx], m1), _), seqPoint), body, m2, freeVars), _), m, ty) ->
-        let body = Expr.Let (TBind(forVarLoop, mkCallArrayGet g m1 elemTy arr idx, seqPoint), body, m2, freeVars)
+    | Expr.Lambda (_, a, b, ([_] as args), DebugPoints (Expr.Let (TBind(_newBindingStampCount, forVarLoop, DebugPoints (Expr.Op (TOp.ILAsm ([I_ldelem_any(ILArrayShape [(Some 0, None)], _)], _), [elemTy], [arr; idx], m1), _), seqPoint), body, m2, freeVars), _), m, ty) ->
+        let body = Expr.Let (TBind(_newBindingStampCount, forVarLoop, mkCallArrayGet g m1 elemTy arr idx, seqPoint), body, m2, freeVars)
         let expr = Expr.Lambda (newUnique(), a, b, args, body, m, ty)
         ValueSome (arr, elemTy, expr)
     | _ -> ValueNone

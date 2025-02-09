@@ -3435,7 +3435,7 @@ type Bindings = Binding list
 ///  -- debugPoint: The debug point for the binding
 [<NoEquality; NoComparison; StructuredFormatDisplay("{DebugText}")>]
 type Binding =
-    | TBind of var: Val * expr: Expr * debugPoint: Syntax.DebugPointAtBinding
+    | TBind of id: int64 * var: Val * expr: Expr * debugPoint: Syntax.DebugPointAtBinding
 
     override ToString: unit -> string
 

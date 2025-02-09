@@ -20,6 +20,7 @@ open FSharp.Compiler.AttributeChecking
 open FSharp.Compiler.CheckBasics
 open FSharp.Compiler.CheckExpressionsOps
 open FSharp.Compiler.CheckRecordSyntaxHelpers
+open FSharp.Compiler.CompilerGlobalState
 open FSharp.Compiler.ConstraintSolver
 open FSharp.Compiler.DiagnosticsLogger
 open FSharp.Compiler.Features
@@ -2423,6 +2424,7 @@ type NormalizedBindingPatternInfo =
 /// constructors and after "pushing" all complex patterns to the right hand side.
 type NormalizedBinding =
   | NormalizedBinding of
+      id: int64 *           /// @@@@@@@@@@@@@@@@@@@ Remove before merge
       visibility: SynAccess option *
       kind: SynBindingKind *
       shouldInline: bool *
@@ -2586,7 +2588,7 @@ module BindingNormalization =
             let paramNames = Some valSynData.SynValInfo.ArgNames
             let checkXmlDocs = cenv.diagnosticOptions.CheckXmlDocs
             let xmlDoc = xmlDoc.ToXmlDoc(checkXmlDocs, paramNames)
-            NormalizedBinding(vis, kind, isInline, isMutable, attrs, xmlDoc, typars, valSynData, pat, rhsExpr, mBinding, debugPoint)
+            NormalizedBinding(newBindingStampCount (), vis, kind, isInline, isMutable, attrs, xmlDoc, typars, valSynData, pat, rhsExpr, mBinding, debugPoint)
 
 //-------------------------------------------------------------------------
 // input is:
@@ -2635,7 +2637,7 @@ module EventDeclarationNormalization =
     let GenerateExtraBindings (cenv: cenv) (bindingAttribs, binding) =
         let g = cenv.g
 
-        let (NormalizedBinding(vis1, bindingKind, isInline, isMutable, _, bindingXmlDoc, _synTyparDecls, valSynData, declPattern, bindingRhs, mBinding, debugPoint)) = binding
+        let (NormalizedBinding(_bindingStampCount, vis1, bindingKind, isInline, isMutable, _, bindingXmlDoc, _synTyparDecls, valSynData, declPattern, bindingRhs, mBinding, debugPoint)) = binding
 
         if CompileAsEvent g bindingAttribs then
 
@@ -2666,7 +2668,7 @@ module EventDeclarationNormalization =
                        error(BadEventTransformation m)
 
                 // reconstitute the binding
-                NormalizedBinding(vis1, bindingKind, isInline, isMutable, [], bindingXmlDoc, noInferredTypars, valSynData, declPattern, bindingRhs, mBinding, debugPoint)
+                NormalizedBinding(_bindingStampCount, vis1, bindingKind, isInline, isMutable, [], bindingXmlDoc, noInferredTypars, valSynData, declPattern, bindingRhs, mBinding, debugPoint)
 
             [ MakeOne ("add_", "AddHandler"); MakeOne ("remove_", "RemoveHandler") ]
         else
@@ -3539,7 +3541,7 @@ let EliminateInitializationGraphs
             | Expr.Quote _ -> ()
             | Expr.WitnessArg (_witnessInfo, _m) -> ()
 
-        and CheckBinding st (TBind(_, e, _)) = CheckExpr st e
+        and CheckBinding st (TBind(_newBindingStampCount, _, e, _)) = CheckExpr st e
 
         and CheckDecisionTree st dt =
             match dt with
@@ -3587,7 +3589,7 @@ let EliminateInitializationGraphs
     // Check the bindings one by one, each w.r.t. the previously available set of binding
     begin
         let checkBind (pgrbind: PreInitializationGraphEliminationBinding) =
-            let (TBind(v, e, _)) = pgrbind.Binding
+            let (TBind(_newBindingStampCount, v, e, _)) = pgrbind.Binding
             check (mkLocalValRef v) e
             availIfInOrder.Add(v, 1)
         bindings |> iterBindings (List.iter checkBind)
@@ -3605,7 +3607,7 @@ let EliminateInitializationGraphs
     if requiresLazyBindings then
         let morphBinding (pgrbind: PreInitializationGraphEliminationBinding) =
             let (RecursiveUseFixupPoints fixupPoints) = pgrbind.FixupPoints
-            let (TBind(v, e, seqPtOpt)) = pgrbind.Binding
+            let (TBind(_newBindingStampCount, v, e, seqPtOpt)) = pgrbind.Binding
             match stripChooseAndExpr e with
             | Expr.Lambda _ | Expr.TyLambda _ ->
                 [], [mkInvisibleBind v e]
@@ -3941,6 +3943,7 @@ type DecodedIndexArg =
 
 type RecDefnBindingInfo =
     | RecDefnBindingInfo of
+        id: int64  *
         containerInfo: ContainerInfo *
         newslotsOk: NewSlotsOK *
         declKind: DeclKind *
@@ -3949,6 +3952,7 @@ type RecDefnBindingInfo =
 /// RecursiveBindingInfo - flows through initial steps of TcLetrecBindings
 type RecursiveBindingInfo =
     | RecursiveBindingInfo of
+          id: int64 *
           recBindIndex: int * // index of the binding in the recursive group
           containerInfo: ContainerInfo *
           enclosingDeclaredTypars: Typars *
@@ -3964,13 +3968,13 @@ type RecursiveBindingInfo =
           ty: TType *
           declKind: DeclKind
 
-    member x.EnclosingDeclaredTypars = let (RecursiveBindingInfo(_, _, enclosingDeclaredTypars, _, _, _, _, _, _, _, _, _, _, _)) = x in enclosingDeclaredTypars
-    member x.Val = let (RecursiveBindingInfo(_, _, _, _, vspec, _, _, _, _, _, _, _, _, _)) = x in vspec
-    member x.ExplicitTyparInfo = let (RecursiveBindingInfo(_, _, _, _, _, explicitTyparInfo, _, _, _, _, _, _, _, _)) = x in explicitTyparInfo
+    member x.EnclosingDeclaredTypars = let (RecursiveBindingInfo(_newBindingStamp, _, _, enclosingDeclaredTypars, _, _, _, _, _, _, _, _, _, _, _)) = x in enclosingDeclaredTypars
+    member x.Val = let (RecursiveBindingInfo(_newBindingStamp, _, _, _, _, vspec, _, _, _, _, _, _, _, _, _)) = x in vspec
+    member x.ExplicitTyparInfo = let (RecursiveBindingInfo(_newBindingStamp, _, _, _, _, _, explicitTyparInfo, _, _, _, _, _, _, _, _)) = x in explicitTyparInfo
     member x.DeclaredTypars = let (ExplicitTyparInfo(_, declaredTypars, _)) = x.ExplicitTyparInfo in declaredTypars
-    member x.Index = let (RecursiveBindingInfo(i, _, _, _, _, _, _, _, _, _, _, _, _, _)) = x in i
-    member x.ContainerInfo = let (RecursiveBindingInfo(_, c, _, _, _, _, _, _, _, _, _, _, _, _)) = x in c
-    member x.DeclKind = let (RecursiveBindingInfo(_, _, _, _, _, _, _, _, _, _, _, _, _, declKind)) = x in declKind
+    member x.Index = let (RecursiveBindingInfo(_newBindingStamp, i, _, _, _, _, _, _, _, _, _, _, _, _, _)) = x in i
+    member x.ContainerInfo = let (RecursiveBindingInfo(_newBindingStamp, _, c, _, _, _, _, _, _, _, _, _, _, _, _)) = x in c
+    member x.DeclKind = let (RecursiveBindingInfo(_newBindingStamp, _, _, _, _, _, _, _, _, _, _, _, _, _, declKind)) = x in declKind
 
 type PreCheckingRecursiveBinding =
     { SyntacticBinding: NormalizedBinding
@@ -6946,7 +6950,7 @@ and TcRecordConstruction (cenv: cenv) (overallTy: TType) isObjExpr env tpenv wit
 //-------------------------------------------------------------------------
 
 and GetNameAndSynValInfoOfObjExprBinding _cenv _env b =
-    let (NormalizedBinding (_, _, _, _, _, _, _, valSynData, pat, rhsExpr, mBinding, _)) = b
+    let (NormalizedBinding (_bindingStampCount,_, _, _, _, _, _, _, valSynData, pat, rhsExpr, mBinding, _)) = b
     let (SynValData(memberFlags = memberFlagsOpt; valInfo = valSynInfo)) = valSynData
     match pat, memberFlagsOpt with
 
@@ -7038,7 +7042,7 @@ and TcObjectExprBinding (cenv: cenv) (env: TcEnv) implTy tpenv (absSlotInfo, bin
 
     let g = cenv.g
 
-    let (NormalizedBinding(vis, kind, isInline, isMutable, attrs, xmlDoc, synTyparDecls, valSynData, headPat, bindingRhs, mBinding, debugPoint)) = bind
+    let (NormalizedBinding(_bindingStampCount, vis, kind, isInline, isMutable, attrs, xmlDoc, synTyparDecls, valSynData, headPat, bindingRhs, mBinding, debugPoint)) = bind
     let (SynValData(memberFlags = memberFlagsOpt)) = valSynData
 
     // 4a2. adjust the binding, especially in the "member" case, a subset of the logic of AnalyzeAndMakeAndPublishRecursiveValue
@@ -7066,7 +7070,7 @@ and TcObjectExprBinding (cenv: cenv) (env: TcEnv) implTy tpenv (absSlotInfo, bin
             | _ ->
                 error(InternalError("unexpected member binding", mBinding))
         lookPat headPat
-    let bind = NormalizedBinding (vis, kind, isInline, isMutable, attrs, xmlDoc, synTyparDecls, valSynData, mkSynPatVar vis logicalMethId, bindingRhs, mBinding, debugPoint)
+    let bind = NormalizedBinding (_bindingStampCount, vis, kind, isInline, isMutable, attrs, xmlDoc, synTyparDecls, valSynData, mkSynPatVar vis logicalMethId, bindingRhs, mBinding, debugPoint)
 
     // 4b. typecheck the binding
     let bindingTy =
@@ -7124,7 +7128,7 @@ and ComputeObjectExprOverrides (cenv: cenv) (env: TcEnv) tpenv impls =
             // Generate extra bindings fo object expressions with bindings using the CLIEvent attribute
             let binds, bindsAttributes =
                [ for binding in binds do
-                     let (NormalizedBinding(_, _, _, _, bindingSynAttribs, _, _, valSynData, _, _, _, _)) = binding
+                     let (NormalizedBinding(_bindingStampCount,_, _, _, _, bindingSynAttribs, _, _, valSynData, _, _, _, _)) = binding
                      let (SynValData(memberFlags = memberFlagsOpt)) = valSynData
                      let attrTgt = ObjectExpressionOverrideBinding.AllowedAttribTargets memberFlagsOpt
                      let bindingAttribs = TcAttributes cenv env attrTgt bindingSynAttribs
@@ -7220,7 +7224,7 @@ and TcObjectExpr (cenv: cenv) env tpenv (objTy, realObjTy, argopt, binds, extraI
         let fldsList =
             binds |> List.map (fun b ->
                 match BindingNormalization.NormalizeBinding ObjExprBinding cenv env b with
-                | NormalizedBinding (_, _, _, _, [], _, _, _, SynPat.Named(SynIdent(id,_), _, _, _), NormalizedBindingRhs(_, _, rhsExpr), _, _) -> id.idText, rhsExpr
+                | NormalizedBinding (_bindingStampCount,_, _, _, _, [], _, _, _, SynPat.Named(SynIdent(id,_), _, _, _), NormalizedBindingRhs(_, _, rhsExpr), _, _) -> id.idText, rhsExpr
                 | _ -> error(Error(FSComp.SR.tcOnlySimpleBindingsCanBeUsedInConstructionExpressions(), b.RangeOfBindingWithoutRhs)))
 
         TcRecordConstruction cenv objTy true env tpenv None objTy fldsList mWholeExpr
@@ -10583,7 +10587,7 @@ and TcLinearExprs bodyChecker cenv env overallTy tpenv isCompExpr synExpr cont =
         if isRec then
             // TcLinearExprs processes at most one recursive binding, this is not tailcalling
             CheckRecursiveBindingIds binds
-            let binds = List.map (fun x -> RecDefnBindingInfo(ExprContainerInfo, NoNewSlots, ExpressionBinding, x)) binds
+            let binds = List.map (fun x -> RecDefnBindingInfo(newBindingStampCount(), ExprContainerInfo, NoNewSlots, ExpressionBinding, x)) binds
             if isUse then errorR(Error(FSComp.SR.tcBindingCannotBeUseAndRec(), m))
             let binds, envinner, tpenv = TcLetrecBindings ErrorOnOverrides cenv env tpenv (binds, m, m)
             let envinner = { envinner with eIsControlFlow = true }
@@ -10893,7 +10897,7 @@ and TcNormalizedBinding declKind (cenv: cenv) env tpenv overallTy safeThisValOpt
     let envinner = AddDeclaredTypars NoCheckForDuplicateTypars (enclosingDeclaredTypars@declaredTypars) env
 
     match bind with
-    | NormalizedBinding(vis, kind, isInline, isMutable, attrs, xmlDoc, _, valSynData, pat, NormalizedBindingRhs(spatsL, rtyOpt, rhsExpr), _, debugPoint) ->
+    | NormalizedBinding(_bindingStampCount, vis, kind, isInline, isMutable, attrs, xmlDoc, _, valSynData, pat, NormalizedBindingRhs(spatsL, rtyOpt, rhsExpr), _, debugPoint) ->
         let (SynValData(memberFlags = memberFlagsOpt)) = valSynData
         let mBinding = pat.Range
 
@@ -11245,7 +11249,7 @@ and TcBindingTyparDecls alwaysRigid cenv env tpenv (ValTyparDecls(synTypars, syn
     ExplicitTyparInfo(rigidCopyOfDeclaredTypars, declaredTypars, infer), tpenv
 
 and TcNonrecBindingTyparDecls cenv env tpenv bind =
-    let (NormalizedBinding(_, _, _, _, _, _, synTyparDecls, _, _, _, _, _)) = bind
+    let (NormalizedBinding(_bindingStampCount, _, _, _, _, _, _, synTyparDecls, _, _, _, _, _)) = bind
     TcBindingTyparDecls true cenv env tpenv synTyparDecls
 
 and TcNonRecursiveBinding declKind cenv env tpenv ty binding =
@@ -12156,12 +12160,12 @@ and AnalyzeAndMakeAndPublishRecursiveValue
         (cenv: cenv)
         (env: TcEnv)
         (tpenv, recBindIdx)
-        (NormalizedRecBindingDefn(containerInfo, newslotsOK, declKind, binding)) =
+        (NormalizedRecBindingDefn(containerInfo, newslotsOK, declKind, binding) as normalizedRecBindingDefn) =
 
     let g = cenv.g
 
     // Pull apart the inputs
-    let (NormalizedBinding(vis1, bindingKind, isInline, isMutable, bindingSynAttribs, bindingXmlDoc, synTyparDecls, valSynData, declPattern, bindingRhs, mBinding, debugPoint)) = binding
+    let (NormalizedBinding(_bindingStampCount, vis1, bindingKind, isInline, isMutable, bindingSynAttribs, bindingXmlDoc, synTyparDecls, valSynData, declPattern, bindingRhs, mBinding, debugPoint)) = binding
     let (NormalizedBindingRhs(_, _, bindingExpr)) = bindingRhs
     let (SynValData(memberFlagsOpt, valSynInfo, thisIdOpt)) = valSynData
     let (ContainerInfo(altActualParent, tcrefContainerInfo)) = containerInfo
@@ -12231,7 +12235,7 @@ and AnalyzeAndMakeAndPublishRecursiveValue
 
     let mangledId = ident(vspec.LogicalName, vspec.Range)
     // Reconstitute the binding with the unique name
-    let revisedBinding = NormalizedBinding (vis1, bindingKind, isInline, isMutable, bindingSynAttribs, bindingXmlDoc, synTyparDecls, valSynData, mkSynPatVar vis2 mangledId, bindingRhs, mBinding, debugPoint)
+    let revisedBinding = NormalizedBinding (_bindingStampCount, vis1, bindingKind, isInline, isMutable, bindingSynAttribs, bindingXmlDoc, synTyparDecls, valSynData, mkSynPatVar vis2 mangledId, bindingRhs, mBinding, debugPoint)
 
     // Create the RecursiveBindingInfo to use in later phases
     let rbinfo =
@@ -12240,7 +12244,7 @@ and AnalyzeAndMakeAndPublishRecursiveValue
             | Some(MemberOrValContainerInfo(_, _, _, safeInitInfo, _)) -> safeInitInfo
             | _ -> NoSafeInitInfo
 
-        RecursiveBindingInfo(recBindIdx, containerInfo, enclosingDeclaredTypars, inlineFlag, vspec, explicitTyparInfo, prelimValReprInfo, memberInfoOpt, baseValOpt, safeThisValOpt, safeInitInfo, vis, ty, declKind)
+        RecursiveBindingInfo(newBindingStampCount(), recBindIdx, containerInfo, enclosingDeclaredTypars, inlineFlag, vspec, explicitTyparInfo, prelimValReprInfo, memberInfoOpt, baseValOpt, safeThisValOpt, safeInitInfo, vis, ty, declKind)
 
     let recBindIdx = recBindIdx + 1
 
@@ -12277,7 +12281,7 @@ and TcLetrecBinding
 
     let g = cenv.g
 
-    let (RecursiveBindingInfo(_, _, enclosingDeclaredTypars, _, vspec, explicitTyparInfo, _, _, baseValOpt, safeThisValOpt, safeInitInfo, _, tau, declKind)) = rbind.RecBindingInfo
+    let (RecursiveBindingInfo(_newBindingStamp, _, _, enclosingDeclaredTypars, _, vspec, explicitTyparInfo, _, _, baseValOpt, safeThisValOpt, safeInitInfo, _, tau, declKind)) = rbind.RecBindingInfo
 
     let allDeclaredTypars = enclosingDeclaredTypars @ rbind.RecBindingInfo.DeclaredTypars
 
@@ -12572,7 +12576,7 @@ and TcLetrecComputeSupportForBinding cenv (pgrbind: PreGeneralizationRecursiveBi
 and TcLetrecGeneralizeBinding cenv denv generalizedTypars (pgrbind: PreGeneralizationRecursiveBinding) : PostGeneralizationRecursiveBinding =
 
     let g = cenv.g
-    let (RecursiveBindingInfo(_, _, enclosingDeclaredTypars, _, vspec, explicitTyparInfo, prelimValReprInfo, memberInfoOpt, _, _, _, vis, _, declKind)) = pgrbind.RecBindingInfo
+    let (RecursiveBindingInfo(_newBindingStamp, _, _, enclosingDeclaredTypars, _, vspec, explicitTyparInfo, prelimValReprInfo, memberInfoOpt, _, _, _, vis, _, declKind)) = pgrbind.RecBindingInfo
     let (CheckedBindingInfo(inlineFlag, _, _, _, _, _, expr, argAttribs, _, _, _, isCompGen, _, isFixed)) = pgrbind.CheckedBinding
 
     if isFixed then
@@ -12635,7 +12639,7 @@ and MakeCheckSafeInit g tinst safeInitInfo reqExpr expr =
 and TcLetrecAdjustMemberForSpecialVals (cenv: cenv) (pgrbind: PostGeneralizationRecursiveBinding) : PostSpecialValsRecursiveBinding =
 
     let g = cenv.g
-    let (RecursiveBindingInfo(_, _, _, _, vspec, _, _, _, baseValOpt, safeThisValOpt, safeInitInfo, _, _, _)) = pgrbind.RecBindingInfo
+    let (RecursiveBindingInfo(_newBindingStamp, _, _, _, _, vspec, _, _, _, baseValOpt, safeThisValOpt, safeInitInfo, _, _, _)) = pgrbind.RecBindingInfo
     let expr = pgrbind.CheckedBinding.Expr
     let debugPoint = pgrbind.CheckedBinding.DebugPoint
 
@@ -12676,11 +12680,11 @@ and TcLetrecAdjustMemberForSpecialVals (cenv: cenv) (pgrbind: PostGeneralization
             mkMemberLambdas g m tps None baseValOpt vsl (body, returnTy)
 
     { ValScheme = pgrbind.ValScheme
-      Binding = TBind(vspec, expr, debugPoint) }
+      Binding = TBind(newBindingStampCount(), vspec, expr, debugPoint) }
 
 and FixupLetrecBind (cenv: cenv) denv generalizedTyparsForRecursiveBlock (bind: PostSpecialValsRecursiveBinding) =
     let g = cenv.g
-    let (TBind(vspec, expr, debugPoint)) = bind.Binding
+    let (TBind(_newBindingStampCount, vspec, expr, debugPoint)) = bind.Binding
 
     // Check coherence of generalization of variables for memberInfo members in generic classes
     match vspec.MemberInfo with
@@ -12699,7 +12703,7 @@ and FixupLetrecBind (cenv: cenv) denv generalizedTyparsForRecursiveBlock (bind: 
 
     let expr = mkGenericBindRhs g vspec.Range generalizedTyparsForRecursiveBlock bind.ValScheme.GeneralizedType expr
 
-    let finalBinding = TBind(vspec, expr, debugPoint)
+    let finalBinding = TBind(newBindingStampCount(), vspec, expr, debugPoint)
 
     { FixupPoints = fixupPoints
       Binding = finalBinding }
@@ -12715,7 +12719,7 @@ and TcLetrecBindings overridesOK (cenv: cenv) env tpenv (binds, bindsm, scopem) 
     let g = cenv.g
 
     // Create prelimRecValues for the recursive items (includes type info from LHS of bindings) *)
-    let normalizedBinds = binds |> List.map (fun (RecDefnBindingInfo(a, b, c, bind)) -> NormalizedRecBindingDefn(a, b, c, BindingNormalization.NormalizeBinding ValOrMemberBinding cenv env bind))
+    let normalizedBinds = binds |> List.map (fun (RecDefnBindingInfo(_newBindingStamp, a, b, c, bind)) -> NormalizedRecBindingDefn(a, b, c, BindingNormalization.NormalizeBinding ValOrMemberBinding cenv env bind))
 
     let uncheckedRecBinds, prelimRecValues, (tpenv, _) = AnalyzeAndMakeAndPublishRecursiveValues overridesOK cenv env tpenv normalizedBinds
 

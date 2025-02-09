@@ -1862,7 +1862,7 @@ type ILGenericParameterDef =
         Name: string
         Constraints: ILTypes
         Variance: ILGenericVariance
-        HasReferenceTypeConstraint: bool        
+        HasReferenceTypeConstraint: bool
         HasNotNullableValueTypeConstraint: bool
         HasDefaultConstructorConstraint: bool
         HasAllowsRefStruct: bool
@@ -1942,7 +1942,7 @@ type ILMethodDef
         customAttrsStored: ILAttributesStored,
         metadataIndex: int32
     ) =
-
+    let x = 1
     new(name, attributes, implAttributes, callingConv, parameters, ret, body, isEntryPoint, genericParams, securityDecls, customAttrs) =
         ILMethodDef(
             name,

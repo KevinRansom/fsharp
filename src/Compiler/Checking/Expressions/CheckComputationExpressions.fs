@@ -1770,7 +1770,7 @@ let rec TryTranslateComputationExpression
             // For 'query' check immediately
             if ceenv.isQuery then
                 match (List.map (BindingNormalization.NormalizeBinding ValOrMemberBinding cenv ceenv.env) binds) with
-                | [ NormalizedBinding(_, SynBindingKind.Normal, false, false, _, _, _, _, _, _, _, _) ] when not isRec -> ()
+                | [ NormalizedBinding(_bindingStampCount, _, SynBindingKind.Normal, false, false, _, _, _, _, _, _, _, _) ] when not isRec -> ()
                 | normalizedBindings ->
                     let failAt m =
                         error (Error(FSComp.SR.tcNonSimpleLetBindingInQuery (), m))

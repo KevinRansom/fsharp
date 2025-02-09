@@ -1371,7 +1371,10 @@ let rebuildLambda m ctorThisValOpt baseValOpt vs (body, bodyTy) = Expr.Lambda (n
 
 let mkLambda m v (body, bodyTy) = mkMultiLambda m [v] (body, bodyTy)
 
-let mkTypeLambda m vs (body, bodyTy) = match vs with [] -> body | _ -> Expr.TyLambda (newUnique(), vs, body, m, bodyTy)
+let mkTypeLambda m vs (body, bodyTy) =
+    let _m = m.ToString()
+    let result = match vs with [] -> body | _ -> Expr.TyLambda (newUnique(), vs, body, m, bodyTy)
+    result
 
 let mkTypeChoose m vs body = match vs with [] -> body | _ -> Expr.TyChoose (vs, body, m)
 
@@ -1400,9 +1403,9 @@ let mkMemberLambdas g m tps ctorThisValOpt baseValOpt vsl (body, bodyTy) =
     mkTypeLambda m tps expr
 
 let mkMultiLambdaBind g v letSeqPtOpt m tps vsl (body, bodyTy) = 
-    TBind(v, mkMultiLambdas g m tps vsl (body, bodyTy), letSeqPtOpt)
+    TBind(newBindingStampCount(), v, mkMultiLambdas g m tps vsl (body, bodyTy), letSeqPtOpt)
 
-let mkBind seqPtOpt v e = TBind(v, e, seqPtOpt)
+let mkBind seqPtOpt v e = TBind(newBindingStampCount(), v, e, seqPtOpt)
 
 let mkLetBind m bind body = Expr.Let (bind, body, m, Construct.NewFreeVarsCache())
 
@@ -1413,13 +1416,13 @@ let mkLetsFromBindings m binds body = List.foldBack (mkLetBind m) binds body
 let mkLet seqPtOpt m v x body = mkLetBind m (mkBind seqPtOpt v x) body
 
 /// Make sticky bindings that are compiler generated (though the variables may not be - e.g. they may be lambda arguments in a beta reduction)
-let mkCompGenBind v e = TBind(v, e, DebugPointAtBinding.NoneAtSticky)
+let mkCompGenBind v e = TBind(newBindingStampCount(), v, e, DebugPointAtBinding.NoneAtSticky)
 
 let mkCompGenBinds (vs: Val list) (es: Expr list) = List.map2 mkCompGenBind vs es
 
 let mkCompGenLet m v x body = mkLetBind m (mkCompGenBind v x) body
 
-let mkInvisibleBind v e = TBind(v, e, DebugPointAtBinding.NoneAtInvisible)
+let mkInvisibleBind v e = TBind(newBindingStampCount(), v, e, DebugPointAtBinding.NoneAtInvisible)
 
 let mkInvisibleBinds (vs: Val list) (es: Expr list) = List.map2 mkInvisibleBind vs es
 
@@ -4484,7 +4487,7 @@ module DebugPrint =
         | TILObjectRepr (TILObjectReprData(_, _, td)) -> wordL (tagText td.Name)
         | _ -> failwith "unreachable"
 
-    let rec bindingL (TBind(v, repr, _)) =
+    let rec bindingL (TBind(_newBindingStampCount, v, repr, _)) =
         (valAtBindL v ^^ wordL(tagText "=")) @@-- exprL repr
 
     and exprL expr =
@@ -5340,7 +5343,7 @@ let accLocalTyconRepr opts b fvs =
 
 let inline accFreeExnRef _exnc fvs = fvs // Note: this exnc (TyconRef) should be collected the surround types, e.g. tinst of Expr.Op
 
-let rec accBindRhs opts (TBind(_, repr, _)) acc = accFreeInExpr opts repr acc
+let rec accBindRhs opts (TBind(_newBindingStampCount, _, repr, _)) acc = accFreeInExpr opts repr acc
           
 and accFreeInSwitchCases opts csl dflt (acc: FreeVars) =
     Option.foldBack (accFreeInDecisionTree opts) dflt (List.foldBack (accFreeInSwitchCase opts) csl acc)
@@ -6241,8 +6244,8 @@ and copyAndRemapAndBindBindings ctxt compgen tmenv binds =
 and remapAndRenameBinds ctxt compgen tmenvinner binds vsR =
     List.map2 (remapAndRenameBind ctxt compgen tmenvinner) binds vsR
 
-and remapAndRenameBind ctxt compgen tmenvinner (TBind(_, repr, letSeqPtOpt)) vR =
-    TBind(vR, remapExprImpl ctxt compgen tmenvinner repr, letSeqPtOpt)
+and remapAndRenameBind ctxt compgen tmenvinner (TBind(_newBindingStampCount, _, repr, letSeqPtOpt)) vR =
+    TBind(newBindingStampCount(), vR, remapExprImpl ctxt compgen tmenvinner repr, letSeqPtOpt)
 
 and remapMethod ctxt compgen tmenv (TObjExprMethod(slotsig, attribs, tps, vs, e, m)) =
     let attribs2 = attribs |> remapAttribs ctxt tmenv
@@ -6639,8 +6642,8 @@ and remarkDecisionTree m x =
 and remarkBinds m binds = List.map (remarkBind m) binds
 
 // This very deliberately drops the sequence points since this is used when adjusting the marks for inlined expressions 
-and remarkBind m (TBind(v, repr, _)) = 
-    TBind(v, remarkExpr m repr, DebugPointAtBinding.NoneAtSticky)
+and remarkBind m (TBind(_newBindingStampCount, v, repr, _)) = 
+    TBind(_newBindingStampCount, v, remarkExpr m repr, DebugPointAtBinding.NoneAtSticky)
 
 //--------------------------------------------------------------------------
 // Mutability analysis
@@ -7233,7 +7236,7 @@ let rec mkExprAddrOfExprAux g mustTakeAddress useReadonlyForGenericArrayAddress 
             None, mkArrayElemAddress g (readonly, ilInstrReadOnlyAnnotation, isNativePtr, shape, elemTy, (aexpr :: args), m), readonly, writeonly
 
         // LVALUE: "&meth(args)" where meth has a byref or inref return. Includes "&span.[idx]".
-        | Expr.Let (TBind(vref, e, _), Expr.Op (TOp.LValueOp (LByrefGet, vref2), _, _, _), _, _)  
+        | Expr.Let (TBind(_newBindingStampCount, vref, e, _), Expr.Op (TOp.LValueOp (LByrefGet, vref2), _, _, _), _, _)  
              when (valRefEq g (mkLocalValRef vref) vref2) && 
                   (MustTakeAddressOfByrefGet g vref2 || CanTakeAddressOfByrefGet g vref2 mut) -> 
             let ty = tyOfExpr g e
@@ -9686,8 +9689,8 @@ let rec rewriteBind env bind =
          | None -> rewriteBindStructure env bind
      | None -> rewriteBindStructure env bind
      
-and rewriteBindStructure env (TBind(v, e, letSeqPtOpt)) = 
-     TBind(v, RewriteExpr env e, letSeqPtOpt) 
+and rewriteBindStructure env (TBind(_newBindingStampCount, v, e, letSeqPtOpt)) = 
+     TBind(_newBindingStampCount, v, RewriteExpr env e, letSeqPtOpt) 
 
 and rewriteBinds env binds = List.map (rewriteBind env) binds
 
@@ -10456,7 +10459,7 @@ let (|WhileLoopForCompiledForEachExpr|_|) expr =
 [<return: Struct>]
 let (|Let|_|) expr = 
     match expr with 
-    | Expr.Let (TBind(v, e1, sp), e2, _, _) -> ValueSome(v, e1, sp, e2)
+    | Expr.Let (TBind(_newBindingStampCount, v, e1, sp), e2, _, _) -> ValueSome(v, e1, sp, e2)
     | _ -> ValueNone
 
 [<return: Struct>]
@@ -11492,16 +11495,16 @@ let (|MatchOptionExpr|_|) expr =
         let tgNone, tgSome = if ucref.CaseName = "None" then tg1, tg2 else tg2, tg1
         match tgs[tgNone], tgs[tgSome] with 
         | TTarget([], noneBranchExpr, b2), 
-          TTarget([], Expr.Let(TBind(unionCaseVar, Expr.Op(TOp.UnionCaseProof a1, a2, a3, a4), a5), 
-                               Expr.Let(TBind(someVar, Expr.Op(TOp.UnionCaseFieldGet (a6a, a6b), a7, a8, a9), a10), someBranchExpr, a11, a12), a13, a14), a16) 
+          TTarget([], Expr.Let(TBind(_newBindingStampCount1, unionCaseVar, Expr.Op(TOp.UnionCaseProof a1, a2, a3, a4), a5), 
+                               Expr.Let(TBind(_newBindingStampCount2, someVar, Expr.Op(TOp.UnionCaseFieldGet (a6a, a6b), a7, a8, a9), a10), someBranchExpr, a11, a12), a13, a14), a16) 
               when unionCaseVar.LogicalName = "unionCase" -> 
 
             // How to rebuild this construct
             let rebuild (cond, noneBranchExpr, someVar, someBranchExpr) =
                 let tgs = Array.zeroCreate 2
                 tgs[tgNone] <- TTarget([], noneBranchExpr, b2)
-                tgs[tgSome] <- TTarget([], Expr.Let(TBind(unionCaseVar, Expr.Op(TOp.UnionCaseProof a1, a2, a3, a4), a5), 
-                                                    Expr.Let(TBind(someVar, Expr.Op(TOp.UnionCaseFieldGet (a6a, a6b), a7, a8, a9), a10), someBranchExpr, a11, a12), a13, a14), a16)
+                tgs[tgSome] <- TTarget([], Expr.Let(TBind(_newBindingStampCount1, unionCaseVar, Expr.Op(TOp.UnionCaseProof a1, a2, a3, a4), a5), 
+                                                    Expr.Let(TBind(_newBindingStampCount2, someVar, Expr.Op(TOp.UnionCaseFieldGet (a6a, a6b), a7, a8, a9), a10), someBranchExpr, a11, a12), a13, a14), a16)
                 rebuildTwoCases (cond, ucref, tg1, tg2, tgs)
 
             ValueSome (cond, noneBranchExpr, someVar, someBranchExpr, rebuild)
@@ -11518,14 +11521,14 @@ let (|ResumableEntryAppExpr|_|) g expr =
 [<return: Struct>]
 let (|ResumableEntryMatchExpr|_|) g expr =
     match expr with
-    | Expr.Let(TBind(matchVar, matchExpr, sp1), MatchOptionExpr (Expr.Val(matchVar2, b, c), noneBranchExpr, someVar, someBranchExpr, rebuildMatch), d, e) ->
+    | Expr.Let(TBind(_newBindingStampCount, matchVar, matchExpr, sp1), MatchOptionExpr (Expr.Val(matchVar2, b, c), noneBranchExpr, someVar, someBranchExpr, rebuildMatch), d, e) ->
         match matchExpr with 
         | ResumableEntryAppExpr g () -> 
             if valRefEq g (mkLocalValRef matchVar) matchVar2 then 
 
                 // How to rebuild this construct
                 let rebuild (noneBranchExpr, someBranchExpr) =
-                    Expr.Let(TBind(matchVar, matchExpr, sp1), rebuildMatch (Expr.Val(matchVar2, b, c), noneBranchExpr, someVar, someBranchExpr), d, e)
+                    Expr.Let(TBind(_newBindingStampCount, matchVar, matchExpr, sp1), rebuildMatch (Expr.Val(matchVar2, b, c), noneBranchExpr, someVar, someBranchExpr), d, e)
 
                 ValueSome (noneBranchExpr, someVar, someBranchExpr, rebuild)
 

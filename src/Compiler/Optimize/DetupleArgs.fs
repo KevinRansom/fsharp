@@ -878,7 +878,7 @@ let transRebind ybi xi =
 // Does not fix calls/defns in binding rhs, that is done by caller.
 //
 
-let passBind penv (TBind(fOrig, repr, letSeqPtOpt) as bind) =
+let passBind penv (TBind(_newBindingStampCount, fOrig, repr, letSeqPtOpt) as bind) =
     let g = penv.g
     let m = fOrig.Range
 

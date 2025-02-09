@@ -688,7 +688,7 @@ let MakeCtorForIncrClassConstructionPhase2C(
 
     // Compute the implicit construction side effects of single 
     // 'let' or 'let rec' binding in the implicit class construction sequence 
-    let TransBind (reps: IncrClassReprInfo) (TBind(v, rhsExpr, spBind)) =
+    let TransBind (reps: IncrClassReprInfo) (TBind(_newBindingStampCount, v, rhsExpr, spBind)) =
         if v.ShouldInline then
             error(Error(FSComp.SR.tcLocalClassBindingsCannotBeInline(), v.Range))
         let rhsExpr = reps.FixupIncrClassExprPhase2C cenv thisValOpt safeStaticInitInfo thisTyInst rhsExpr
@@ -727,13 +727,13 @@ let MakeCtorForIncrClassConstructionPhase2C(
             // Replace the type parameters that used to be on the rhs with 
             // the full set of type parameters including the type parameters of the enclosing class
             let rhsExpr = mkTypeLambda m methodVal.Typars (mkTypeChoose m chooseTps tauExpr, tauTy)
-            (isPriorToSuperInit, id), [TBind (methodVal, rhsExpr, spBind)]
+            (isPriorToSuperInit, id), [TBind (newBindingStampCount(), methodVal, rhsExpr, spBind)]
             
         // If it's represented as a non-escaping local variable then just bind it to its value
         // If it's represented as a non-escaping local arg then no binding necessary (ctor args are already bound)
             
         | InVar isArg ->
-            (isPriorToSuperInit, (fun e -> if isArg then e else mkLetBind m (TBind(v, rhsExpr, spBind)) e)), []
+            (isPriorToSuperInit, (fun e -> if isArg then e else mkLetBind m (TBind(newBindingStampCount(), v, rhsExpr, spBind)) e)), []
 
         | InField (isStatic, idx, _) ->
                 // Use spBind if it available as the span for the assignment into the field

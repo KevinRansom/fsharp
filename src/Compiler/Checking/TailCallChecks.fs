@@ -274,7 +274,7 @@ and CheckExprLinear (cenv: cenv) expr (ctxt: PermitByRefExpr) (tailCall: TailCal
         // tailcall
         CheckExprLinear cenv e2 ctxt tailCall
 
-    | Expr.Let(TBind(v, _bindRhs, _) as bind, body, _, _) ->
+    | Expr.Let(TBind(_newBindingStampCount, v, _bindRhs, _) as bind, body, _, _) ->
         let isByRef = isByrefTy cenv.g v.Type
 
         let bindingContext =
@@ -720,7 +720,7 @@ and CheckDecisionTreeTest cenv discrim =
     | DecisionTreeTest.ActivePatternCase(exp, _, _, _, _, _) -> CheckExprNoByrefs cenv TailCall.No exp
     | _ -> ()
 
-and CheckBinding cenv alwaysCheckNoReraise ctxt (TBind(v, bindRhs, _) as bind) : unit =
+and CheckBinding cenv alwaysCheckNoReraise ctxt (TBind(_newBindingStampCount, v, bindRhs, _) as bind) : unit =
     let g = cenv.g
     let isTop = Option.isSome bind.Var.ValReprInfo
     let tailCall = TailCall.YesFromVal g bind.Var
