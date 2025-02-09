@@ -6940,9 +6940,10 @@ and GetIlxClosureFreeVars cenv m (thisVars: ValRef list) boxity eenv takenNames 
         let initialFreeTyvars =
             match g.realsig with
             | true ->
-                { emptyFreeTyvars with
-                    FreeTypars = eenv.tyenv.AsUserProvidedTypars()
-                }
+                emptyFreeTyvars
+                //{ emptyFreeTyvars with
+                //    FreeTypars = eenv.tyenv.AsUserProvidedTypars()
+                //}
             | false -> emptyFreeTyvars
 
         ilCloTypeRef, initialFreeTyvars

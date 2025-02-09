@@ -10591,13 +10591,13 @@ and TcLinearExprs bodyChecker cenv env overallTy tpenv isCompExpr synExpr cont =
         TcLinearExprs bodyChecker cenv env2 overallTy tpenv isCompExpr expr2 (fun (expr2R, tpenv) ->
             cont (Expr.Sequential (expr1R, expr2R, NormalSeq, m), tpenv))
 
-    | SynExpr.LetOrUse (isRec, isUse, binds, body, m, _) when not (isUse && isCompExpr) ->
+    | SynExpr.LetOrUse (isRec, isUse, binds, body, m, _a) when not (isUse && isCompExpr) ->
         if isRec then
             // TcLinearExprs processes at most one recursive binding, this is not tailcalling
             CheckRecursiveBindingIds binds
             let containerInfo =
                 match g.realsig, env.eFamilyType with
-                | true, Some tcref -> TyconContainerInfo((Parent tcref), tcref, tcref.TyparsNoRange, NoSafeInitInfo)
+                | true, Some tcref -> TyconContainerInfo(ParentNone, tcref, tcref.TyparsNoRange, NoSafeInitInfo)
                 | _ -> ExprContainerInfo
             let binds = List.map (fun x -> RecDefnBindingInfo(newBindingStampCount(), containerInfo, NoNewSlots, ExpressionBinding, x)) binds
             if isUse then errorR(Error(FSComp.SR.tcBindingCannotBeUseAndRec(), m))
