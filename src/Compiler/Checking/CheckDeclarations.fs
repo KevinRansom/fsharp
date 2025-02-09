@@ -183,14 +183,6 @@ module MutRecShapes =
 
    let iterTyconsWithEnv f1 env xs = iterWithEnv f1 (fun _env _x -> ()) (fun _env _x -> ()) (fun _env _x -> ()) env xs
 
-/// Indicates a declaration is contained in the given module 
-let ModuleOrNamespaceContainerInfo modref =
-    ContainerInfo(Parent modref, Some(MemberOrValContainerInfo(modref, None, None, NoSafeInitInfo, [])))
-
-/// Indicates a declaration is contained in the given type definition in the given module 
-let TyconContainerInfo (parent, tcref, declaredTyconTypars, safeInitInfo) =
-    ContainerInfo(parent, Some(MemberOrValContainerInfo(tcref, None, None, safeInitInfo, declaredTyconTypars)))
-
 type TyconBindingDefn = TyconBindingDefn of ContainerInfo * NewSlotsOK * DeclKind * SynMemberDefn option * range
 
 type MutRecSigsInitialData = MutRecShape<SynTypeDefnSig, SynValSig, SynComponentInfo> list
