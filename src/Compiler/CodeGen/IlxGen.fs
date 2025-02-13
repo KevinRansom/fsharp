@@ -363,13 +363,9 @@ let useCallVirt (cenv: cenv) boxity (mspec: ILMethodSpec) isBaseCall =
 type CompileLocation =
     {
         Scope: ILScopeRef
-
         TopImplQualifiedName: string
-
         Namespace: string option
-
         Enclosing: string list
-
         QualifiedNameOfFile: string
     }
 
@@ -487,7 +483,10 @@ let TypeRefForCompLoc cloc =
 
 /// Compute an ILType for a CompilationLocation for a non-generic type
 let mkILTyForCompLoc cloc =
-    mkILNonGenericBoxedTy (TypeRefForCompLoc cloc)
+    mkILBoxedTy (TypeRefForCompLoc cloc) []
+
+let mkILGenericTyForCompLoc cloc typeArgs =
+    mkILBoxedTy (TypeRefForCompLoc cloc) typeArgs
 
 /// Compute visibility for type members
 /// based on hidden and accessibility from the source code
@@ -562,25 +561,30 @@ type TypeReprEnv
     static member Empty = empty
 
     /// Reset to the empty environment, where no type parameters are in scope.
-    member eenv.ResetTypars() =
-        TypeReprEnv(count = 0, reprs = Map.empty, templateReplacement = eenv.TemplateReplacement)
+    member tyenv.ResetTypars() =
+        TypeReprEnv(count = 0, reprs = Map.empty, templateReplacement = tyenv.TemplateReplacement)
 
     /// Get the environment for a fixed set of type parameters
-    member eenv.ForTypars tps = eenv.ResetTypars().Add tps
+    member tyenv.ForTypars tps = tyenv.ResetTypars().Add tps
 
     /// Get the environment for within a type definition
-    member eenv.ForTycon(tycon: Tycon) = eenv.ForTypars tycon.TyparsNoRange
+    member tyenv.ForTycon(tycon: Tycon) = tyenv.ForTypars tycon.TyparsNoRange
 
     /// Get the environment for generating a reference to items within a type definition
-    member eenv.ForTyconRef(tcref: TyconRef) = eenv.ForTycon tcref.Deref
+    member tyenv.ForTyconRef(tcref: TyconRef) = tyenv.ForTycon tcref.Deref
 
     /// Get a list of the Typars in this environment
-    member eenv.AsUserProvidedTypars() =
+    member tyenv.AsTypars() =
         reprs
         |> Map.toList
         |> List.map (fun (_, (_, tp)) -> tp)
         |> List.filter (fun tp -> not tp.IsCompilerGenerated)
         |> Zset.ofList typarOrder
+
+    member tyenv.AsTTypes() =
+        reprs
+        |> Map.toList
+        |> List.map (fun (_, (_, tp)) -> mkTyparTy tp)
 
 //--------------------------------------------------------------------------
 // Generate type references
@@ -1569,7 +1573,7 @@ let ComputeStorageForFSharpMember cenv valReprInfo memberInfo (vref: ValRef) m =
 /// Compute the representation information for an F#-declared function in a module or an F#-declared extension member.
 /// Note, there is considerable overlap with ComputeStorageForFSharpMember/GetMethodSpecForMemberVal and these could be
 /// rationalized.
-let ComputeStorageForFSharpFunctionOrFSharpExtensionMember (cenv: cenv) cloc valReprInfo (vref: ValRef) m =
+let ComputeStorageForFSharpFunctionOrFSharpExtensionMember (cenv: cenv) (eenv: IlxGenEnv) cloc valReprInfo (vref: ValRef) m =
     let g = cenv.g
     let nm = vref.CompiledName g.CompilerGlobalState
     let numEnclosingTypars = CountEnclosingTyparsOfActualParentOfVal vref.Deref
@@ -1581,7 +1585,10 @@ let ComputeStorageForFSharpFunctionOrFSharpExtensionMember (cenv: cenv) cloc val
     let methodArgTys, paramInfos = curriedArgInfos |> List.concat |> List.unzip
     let ilMethodArgTys = GenParamTypes cenv m tyenvUnderTypars false methodArgTys
     let ilRetTy = GenReturnType cenv m tyenvUnderTypars returnTy
-    let ilLocTy = mkILTyForCompLoc cloc
+    let ilLocTy =                           //@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+        match g.realsig with
+        | false -> mkILTyForCompLoc cloc
+        | true -> mkILGenericTyForCompLoc cloc (GenTypeArgs cenv m eenv.tyenv (eenv.tyenv.AsTTypes()))
     let ilMethodInst = GenTypeArgs cenv m tyenvUnderTypars (List.map mkTyparTy tps)
 
     let mspec =
@@ -1621,6 +1628,7 @@ let ComputeStorageForValWithValReprInfo
         isInteractive,
         optShadowLocal,
         vref: ValRef,
+        eenv: IlxGenEnv,
         cloc
     ) =
 
@@ -1666,28 +1674,29 @@ let ComputeStorageForValWithValReprInfo
             | _ ->
                 match vref.MemberInfo with
                 | Some memberInfo when not vref.IsExtensionMember -> ComputeStorageForFSharpMember cenv valReprInfo memberInfo vref m
-                | _ -> ComputeStorageForFSharpFunctionOrFSharpExtensionMember cenv cloc valReprInfo vref m
+                | _ -> ComputeStorageForFSharpFunctionOrFSharpExtensionMember cenv eenv cloc valReprInfo vref m
 
 /// Determine how an F#-declared value, function or member is represented, if it is in the assembly being compiled.
 let ComputeAndAddStorageForLocalValWithValReprInfo (cenv, intraAssemblyFieldTable, isInteractive, optShadowLocal) cloc (v: Val) eenv =
     let storage =
-        ComputeStorageForValWithValReprInfo(cenv, Some intraAssemblyFieldTable, isInteractive, optShadowLocal, mkLocalValRef v, cloc)
+        ComputeStorageForValWithValReprInfo(cenv, Some intraAssemblyFieldTable, isInteractive, optShadowLocal, mkLocalValRef v, eenv, cloc)
 
     AddStorageForVal cenv.g (v, notlazy storage) eenv
 
 /// Determine how an F#-declared value, function or member is represented, if it is an external assembly.
-let ComputeStorageForNonLocalVal cenv cloc modref (v: Val) =
+let ComputeStorageForNonLocalVal cenv eenv cloc modref (v: Val) =
     match v.ValReprInfo with
     | None -> error (InternalError("ComputeStorageForNonLocalVal, expected an ValReprInfo for " + v.LogicalName, v.Range))
-    | Some _ -> ComputeStorageForValWithValReprInfo(cenv, None, false, NoShadowLocal, mkNestedValRef modref v, cloc)
+    | Some _ -> ComputeStorageForValWithValReprInfo(cenv, None, false, NoShadowLocal, mkNestedValRef modref v, eenv, cloc)
 
 /// Determine how all the F#-declared top level values, functions and members are represented, for an external module or namespace.
-let rec AddStorageForNonLocalModuleOrNamespaceRef cenv cloc acc (modref: ModuleOrNamespaceRef) (modul: ModuleOrNamespace) =
+let rec AddStorageForNonLocalModuleOrNamespaceRef cenv eenv cloc acc (modref: ModuleOrNamespaceRef) (modul: ModuleOrNamespace) =
     let acc =
         (acc, modul.ModuleOrNamespaceType.ModuleAndNamespaceDefinitions)
         ||> List.fold (fun acc smodul ->
             AddStorageForNonLocalModuleOrNamespaceRef
                 cenv
+                eenv
                 (CompLocForSubModuleOrNamespace cloc smodul)
                 acc
                 (modref.NestedTyconRef smodul)
@@ -1696,7 +1705,7 @@ let rec AddStorageForNonLocalModuleOrNamespaceRef cenv cloc acc (modref: ModuleO
     let acc =
         (acc, modul.ModuleOrNamespaceType.AllValsAndMembers)
         ||> Seq.fold (fun acc v ->
-            AddStorageForVal cenv.g (v, InterruptibleLazy(fun _ -> ComputeStorageForNonLocalVal cenv cloc modref v)) acc)
+            AddStorageForVal cenv.g (v, InterruptibleLazy(fun _ -> ComputeStorageForNonLocalVal cenv eenv cloc modref v)) acc)
 
     acc
 
@@ -1712,7 +1721,7 @@ let AddStorageForExternalCcu cenv eenv (ccu: CcuThunk) =
                 (fun smodul acc ->
                     let cloc = CompLocForSubModuleOrNamespace cloc smodul
                     let modref = mkNonLocalCcuRootEntityRef ccu smodul
-                    AddStorageForNonLocalModuleOrNamespaceRef cenv cloc acc modref smodul)
+                    AddStorageForNonLocalModuleOrNamespaceRef cenv eenv cloc acc modref smodul)
                 ccu.RootModulesAndNamespaces
                 eenv
 
@@ -1721,7 +1730,7 @@ let AddStorageForExternalCcu cenv eenv (ccu: CcuThunk) =
 
             (eenv, ccu.Contents.ModuleOrNamespaceType.AllValsAndMembers)
             ||> Seq.fold (fun acc v ->
-                AddStorageForVal cenv.g (v, InterruptibleLazy(fun _ -> ComputeStorageForNonLocalVal cenv cloc eref v)) acc)
+                AddStorageForVal cenv.g (v, InterruptibleLazy(fun _ -> ComputeStorageForNonLocalVal cenv eenv cloc eref v)) acc)
 
         eenv
 
@@ -6976,7 +6985,7 @@ and GetIlxClosureFreeVars cenv m (thisVars: ValRef list) boxity eenv takenNames 
             match g.realsig with
             | true ->
                 { emptyFreeTyvars with
-                    FreeTypars = eenv.tyenv.AsUserProvidedTypars()
+                    FreeTypars = eenv.tyenv.AsTypars()
                 }
             | false -> emptyFreeTyvars
 
