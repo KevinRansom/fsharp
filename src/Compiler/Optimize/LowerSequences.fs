@@ -115,7 +115,7 @@ let ConvertSequenceExprToObject g amap overallExpr =
         if verbose then 
             printfn "LowerSeq: found state variable %s" bind.Var.DisplayName
 
-        let (TBind(v, e, sp)) = bind
+        let (TBind(_newBindingStampCount, v, e, sp)) = bind
         let addDebugPoint e =
             match sp with
             | DebugPointAtBinding.Yes m -> Expr.DebugPoint(DebugPointAtLeafExpr.Yes m, e)

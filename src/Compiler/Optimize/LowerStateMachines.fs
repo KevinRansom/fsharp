@@ -76,7 +76,7 @@ let RepresentBindingAsStateVar g (bind: Binding) (resBody: StateMachineConversio
     if sm_verbose then 
         printfn "LowerStateMachine: found state variable %s" bind.Var.DisplayName
     
-    let (TBind(v, e, sp)) = bind
+    let (TBind(_newBindingStampCount, v, e, sp)) = bind
     let addDebugPoint innerExpr =
         match sp with
         | DebugPointAtBinding.Yes m -> Expr.DebugPoint(DebugPointAtLeafExpr.Yes m, innerExpr)

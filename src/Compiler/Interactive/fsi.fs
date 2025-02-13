@@ -1658,7 +1658,7 @@ let internal mkBoundValueTypedImpl tcGlobals m moduleName name ty =
     mty <- ModuleOrNamespaceType(ModuleOrNamespaceKind.ModuleOrType, QueueList.one v, QueueList.empty)
 
     let bindExpr = mkCallDefaultOf tcGlobals range0 ty
-    let binding = Binding.TBind(v, bindExpr, DebugPointAtBinding.NoneAtLet)
+    let binding = Binding.TBind(newBindingStampCount(), v, bindExpr, DebugPointAtBinding.NoneAtLet)
 
     let mbinding =
         ModuleOrNamespaceBinding.Module(entity, TMDefs([ TMDefLet(binding, m) ]))

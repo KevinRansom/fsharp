@@ -1013,7 +1013,7 @@ and CheckExprLinear (cenv: cenv) (env: env) expr (ctxt: PermitByRefExpr) (contf 
         // tailcall
         CheckExprLinear cenv env e2 ctxt contf
 
-    | Expr.Let (TBind(v, _bindRhs, _) as bind, body, _, _) ->
+    | Expr.Let (TBind(_newBindingStampCount, v, _bindRhs, _) as bind, body, _, _) ->
         let isByRef = isByrefTy cenv.g v.Type
 
         let bindingContext =
@@ -2030,7 +2030,7 @@ and AdjustAccess isHidden (cpath: unit -> CompilationPath) access =
     else
         access
 
-and CheckBinding cenv env alwaysCheckNoReraise ctxt (TBind(v, bindRhs, _) as bind) : Limit =
+and CheckBinding cenv env alwaysCheckNoReraise ctxt (TBind(_newBindingStampCount, v, bindRhs, _) as bind) : Limit =
     let vref = mkLocalValRef v
     let g = cenv.g
     let isTop = Option.isSome bind.Var.ValReprInfo
@@ -2147,7 +2147,7 @@ and CheckBindings cenv env binds =
         CheckBinding cenv env false PermitByRefExpr.Yes bind |> ignore
 
 // Top binds introduce expression, check they are reraise free.
-let CheckModuleBinding cenv env (TBind(v, e, _) as bind) =
+let CheckModuleBinding cenv env (TBind(_newBindingStampCount, v, e, _) as bind) =
     let g = cenv.g
     let isExplicitEntryPoint = HasFSharpAttribute g g.attrib_EntryPointAttribute v.Attribs
     if isExplicitEntryPoint then

@@ -23,6 +23,7 @@ open FSharp.Compiler.CheckBasics
 open FSharp.Compiler.CheckExpressionsOps
 open FSharp.Compiler.CheckIncrementalClasses
 open FSharp.Compiler.CheckPatterns
+open FSharp.Compiler.CompilerGlobalState
 open FSharp.Compiler.ConstraintSolver
 open FSharp.Compiler.DiagnosticsLogger
 open FSharp.Compiler.Features
@@ -181,14 +182,6 @@ module MutRecShapes =
            | MutRecShape.ModuleAbbrev a -> f4 env a)
 
    let iterTyconsWithEnv f1 env xs = iterWithEnv f1 (fun _env _x -> ()) (fun _env _x -> ()) (fun _env _x -> ()) env xs
-
-/// Indicates a declaration is contained in the given module 
-let ModuleOrNamespaceContainerInfo modref =
-    ContainerInfo(Parent modref, Some(MemberOrValContainerInfo(modref, None, None, NoSafeInitInfo, [])))
-
-/// Indicates a declaration is contained in the given type definition in the given module 
-let TyconContainerInfo (parent, tcref, declaredTyconTypars, safeInitInfo) =
-    ContainerInfo(parent, Some(MemberOrValContainerInfo(tcref, None, None, safeInitInfo, declaredTyconTypars)))
 
 type TyconBindingDefn = TyconBindingDefn of ContainerInfo * NewSlotsOK * DeclKind * SynMemberDefn option * range
 
@@ -1017,7 +1010,7 @@ module MutRecBindingChecking =
               | MutRecShape.ModuleAbbrev x -> MutRecShape.ModuleAbbrev x, outerState 
               | MutRecShape.Lets recBinds -> 
                 let normRecDefns = 
-                   [ for RecDefnBindingInfo(a, b, c, bind) in recBinds do 
+                   [ for RecDefnBindingInfo(_newBindingStampCount, a, b, c, bind) in recBinds do 
                        yield NormalizedRecBindingDefn(a, b, c, BindingNormalization.NormalizeBinding ValOrMemberBinding cenv envForDecls bind) ]
                 let bindsAndValues, (tpenv, recBindIdx) = ((tpenv, recBindIdx), normRecDefns) ||> List.mapFold (AnalyzeAndMakeAndPublishRecursiveValue ErrorOnOverrides false cenv envForDecls) 
                 let binds = bindsAndValues |> List.collect fst
@@ -1376,7 +1369,7 @@ module MutRecBindingChecking =
                                 if isRec then
                                 
                                     // Type check local recursive binding 
-                                    let binds = binds |> List.map (fun bind -> RecDefnBindingInfo(ExprContainerInfo, NoNewSlots, ClassLetBinding isStatic, bind))
+                                    let binds = binds |> List.map (fun bind -> RecDefnBindingInfo(newBindingStampCount(), ExprContainerInfo, NoNewSlots, ClassLetBinding isStatic, bind))
                                     let binds, env, tpenv = TcLetrecBindings ErrorOnOverrides cenv envForBinding tpenv (binds, scopem, scopem)
                                     let bindRs = [IncrClassBindingGroup(binds, isStatic, true)]
                                     binds, bindRs, env, tpenv 
@@ -1665,14 +1658,14 @@ module MutRecBindingChecking =
                         [ match incrCtorInfoOpt, ctorBodyLambdaExprOpt with
                           | None, _ | _, None -> ()
                           | Some incrCtorInfo, Some ctorBodyLambdaExpr ->
-                              let ctorValueExprBinding = TBind(incrCtorInfo.InstanceCtorVal, ctorBodyLambdaExpr, DebugPointAtBinding.NoneAtSticky)
+                              let ctorValueExprBinding = TBind(newBindingStampCount(), incrCtorInfo.InstanceCtorVal, ctorBodyLambdaExpr, DebugPointAtBinding.NoneAtSticky)
                               let rbind = { ValScheme = incrCtorInfo.InstanceCtorValScheme ; Binding = ctorValueExprBinding }
                               FixupLetrecBind cenv envForDecls.DisplayEnv generalizedTyparsForRecursiveBlock rbind
                           match cctorBodyLambdaExprOpt with 
                           | None -> ()
                           | Some cctorBodyLambdaExpr -> 
                               let _, cctorVal, cctorValScheme = staticCtorInfo.StaticCtorValInfo.Force()
-                              let cctorValueExprBinding = TBind(cctorVal, cctorBodyLambdaExpr, DebugPointAtBinding.NoneAtSticky)
+                              let cctorValueExprBinding = TBind(newBindingStampCount(), cctorVal, cctorBodyLambdaExpr, DebugPointAtBinding.NoneAtSticky)
                               let rbind = { ValScheme = cctorValScheme; Binding = cctorValueExprBinding }
                               FixupLetrecBind cenv envForDecls.DisplayEnv generalizedTyparsForRecursiveBlock rbind ] 
 
@@ -1682,7 +1675,7 @@ module MutRecBindingChecking =
                     // Fixup members
                     let memberBindsWithFixups = 
                         memberBindsWithFixups |> List.map (fun pgrbind -> 
-                            let (TBind(v, x, spBind)) = pgrbind.Binding
+                            let (TBind(_newBindingStampCount, v, x, spBind)) = pgrbind.Binding
 
                             // Work out the 'this' variable and type instantiation for field fixups. 
                             // We use the instantiation from the instance member if any. Note: It is likely this is not strictly needed 
@@ -1694,7 +1687,7 @@ module MutRecBindingChecking =
                                     
                             let x = localReps.FixupIncrClassExprPhase2C cenv thisValOpt safeStaticInitInfo thisTyInst x 
 
-                            { pgrbind with Binding = TBind(v, x, spBind) } )
+                            { pgrbind with Binding = TBind(newBindingStampCount(), v, x, spBind) } )
                         
                     tyconOpt, ctorValueExprBindings @ memberBindsWithFixups, methodBinds  
                 
@@ -4563,7 +4556,7 @@ module TcDeclarations =
         // Create the entities for each module and type definition, and process the core representation of each type definition.
         let tycons, envMutRecPrelim, mutRecDefnsAfterCore = 
             EstablishTypeDefinitionCores.TcMutRecDefns_Phase1 
-               (fun containerInfo synBinds -> [ for synBind in synBinds -> RecDefnBindingInfo(containerInfo, NoNewSlots, ModuleOrMemberBinding, synBind) ])
+               (fun containerInfo synBinds -> [ for synBind in synBinds -> RecDefnBindingInfo(newBindingStampCount(), containerInfo, NoNewSlots, ModuleOrMemberBinding, synBind) ])
                cenv envInitial parent typeNames false tpenv m scopem mutRecNSInfo mutRecDefnsAfterSplit
 
         // Package up the phase two information for processing members.
@@ -5292,7 +5285,7 @@ let rec TcModuleOrNamespaceElementNonMutRec (cenv: cenv) parent typeNames scopem
               let containerInfo = ModuleOrNamespaceContainerInfo parentModule
               if letrec then 
                 let scopem = unionRanges m scopem
-                let binds = binds |> List.map (fun bind -> RecDefnBindingInfo(containerInfo, NoNewSlots, ModuleOrMemberBinding, bind))
+                let binds = binds |> List.map (fun bind -> RecDefnBindingInfo(newBindingStampCount(), containerInfo, NoNewSlots, ModuleOrMemberBinding, bind))
                 let binds, env, _ = TcLetrecBindings WarnOnOverrides cenv env tpenv (binds, m, scopem)
                 let defn = TMDefRec(true, [], [], binds |> List.map ModuleOrNamespaceBinding.Binding, m)
                 return ([defn], [], []), env, env
@@ -5598,7 +5591,9 @@ let emptyTcEnv g =
       eCallerMemberName = None 
       eLambdaArgInfos = []
       eIsControlFlow = false
-      eCachedImplicitYieldExpressions = HashMultiMap(HashIdentity.Structural, useConcurrentDictionary = true) }
+      eCachedImplicitYieldExpressions = HashMultiMap(HashIdentity.Structural, useConcurrentDictionary = true) 
+      reqdThisValTyOpt = None
+}
 
 let CreateInitialTcEnv(g, amap, scopem, assemblyName, ccus) =
     (emptyTcEnv g, ccus) ||> List.collectFold (fun env (ccu, autoOpens, internalsVisible) -> 

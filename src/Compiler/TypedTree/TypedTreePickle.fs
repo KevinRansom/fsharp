@@ -2575,7 +2575,7 @@ and p_dtree_discrim x st =
     | DecisionTreeTest.Error _ -> pfailwith st "DecisionTreeTest.Error: only used during pattern match compilation"
 
 and p_target (TTarget(a, b, _)) st = p_tup2 p_Vals p_expr (a, b) st
-and p_bind (TBind(a, b, _)) st = p_tup2 p_Val p_expr (a, b) st
+and p_bind (TBind(_newBindingStampCount, a, b, _)) st = p_tup2 p_Val p_expr (a, b) st
 
 and p_lval_op_kind x st =
     p_byte (match x with LAddrOf _ -> 0 | LByrefGet -> 1 | LSet -> 2 | LByrefSet -> 3) st
@@ -2609,7 +2609,7 @@ and u_dtree_discrim st =
 
 and u_target st = let a, b = u_tup2 u_Vals u_expr st in (TTarget(a, b, None))
 
-and u_bind st = let a = u_Val st in let b = u_expr st in TBind(a, b, DebugPointAtBinding.NoneAtSticky)
+and u_bind st = let a = u_Val st in let b = u_expr st in TBind(newBindingStampCount(), a, b, DebugPointAtBinding.NoneAtSticky)
 
 and u_lval_op_kind st =
     match u_byte st with

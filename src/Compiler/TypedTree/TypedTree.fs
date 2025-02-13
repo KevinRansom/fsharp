@@ -630,9 +630,9 @@ type EntityOptionalData =
 [<NoEquality; NoComparison; RequireQualifiedAccess; StructuredFormatDisplay("{DebugText}")>] 
 type Entity = 
     {
-      /// The declared type parameters of the type  
+      /// The declared type parameters of the type
       // MUTABILITY; used only during creation and remapping of tycons 
-      mutable entity_typars: LazyWithContext<Typars, range>        
+      mutable entity_typars: LazyWithContext<Typars, range>
       
       mutable entity_flags: EntityFlags
       
@@ -4837,18 +4837,19 @@ type Bindings = Binding list
 [<NoEquality; NoComparison; StructuredFormatDisplay("{DebugText}")>]
 type Binding = 
     | TBind of
+        id: int64 *
         var: Val *
         expr: Expr *
         debugPoint: DebugPointAtBinding
 
     /// The value being bound
-    member x.Var = (let (TBind(v, _, _)) = x in v)
+    member x.Var = (let (TBind(_newBindingStampCount, v, _, _)) = x in v)
 
     /// The expression the value is being bound to
-    member x.Expr = (let (TBind(_, e, _)) = x in e)
+    member x.Expr = (let (TBind(_newBindingStampCount, _, e, _)) = x in e)
 
     /// The information about whether to emit a sequence point for the binding
-    member x.DebugPoint = (let (TBind(_, _, sp)) = x in sp)
+    member x.DebugPoint = (let (TBind(_newBindingStampCount, _, _, sp)) = x in sp)
 
     [<DebuggerBrowsable(DebuggerBrowsableState.Never)>]
     member x.DebugText = x.ToString()

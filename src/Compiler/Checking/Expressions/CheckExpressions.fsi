@@ -172,6 +172,12 @@ type ContainerInfo =
 
 val ExprContainerInfo: ContainerInfo
 
+/// Indicates a declaration is contained in the given module 
+val ModuleOrNamespaceContainerInfo: modref: EntityRef -> ContainerInfo
+
+/// Indicates a declaration is contained in the given type definition in the given module 
+val TyconContainerInfo: parent: ParentRef * tcref: TyconRef * declaredTyconTypars: Typars * safeInitInfo: SafeInitData -> ContainerInfo
+
 /// Indicates if member declarations are allowed to be abstract members.
 type NewSlotsOK =
     | NewSlotsOK
@@ -220,6 +226,7 @@ type IsObjExprBinding =
 /// Represents the initial information about a recursive binding
 type RecDefnBindingInfo =
     | RecDefnBindingInfo of
+        id: int64 *
         containerInfo: ContainerInfo *
         newslotsOk: NewSlotsOK *
         declKind: DeclKind *
@@ -251,6 +258,7 @@ type NormalizedBindingRhs =
 /// constructors and after "pushing" all complex patterns to the right hand side.
 type NormalizedBinding =
     | NormalizedBinding of
+        id: int64 *
         visibility: SynAccess option *
         kind: SynBindingKind *
         shouldInline: bool *
@@ -267,6 +275,7 @@ type NormalizedBinding =
 /// RecursiveBindingInfo - flows through initial steps of TcLetrec
 type RecursiveBindingInfo =
     | RecursiveBindingInfo of
+        id: int64 *
         recBindIndex: int *  // index of the binding in the recursive group
         containerInfo: ContainerInfo *
         enclosingDeclaredTypars: Typars *

@@ -20,7 +20,7 @@ open FSharp.Compiler.TypedTreeOps
 open FSharp.Compiler.TypedTreeOps.DebugPrint
 open FSharp.Compiler.TcGlobals
 
-let verboseTLR = false
+let verboseTLR = true
 
 let InnerLambdasToTopLevelFunctionsStackGuardDepth = StackGuard.GetDepthOption "InnerLambdasToTopLevelFunctions"
 
@@ -86,8 +86,12 @@ let isDelayedRepr (f: Val) e =
 
 // REVIEW: these should just be replaced by direct calls to mkLocal, mkCompGenLocal etc.
 // REVIEW: However these set an arity whereas the others don't
-let mkLocalNameTypeArity compgen m name ty valReprInfo =
-    Construct.NewVal(name, m, None, ty, Immutable, compgen, valReprInfo, taccessPublic, ValNotInRecScope, None, NormalVal, [], ValInline.Optional, XmlDoc.Empty, false, false, false, false, false, false, None, ParentNone)
+//let mkLocalNameTypeArity compgen m name ty valReprInfo =
+//    Construct.NewVal(name, m, None, ty, Immutable, compgen, valReprInfo, taccessPublic, ValNotInRecScope, None, NormalVal, [], ValInline.Optional, XmlDoc.Empty, false, false, false, false, false, false, None, ParentNone)
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
+let mkLocalNameTypeArityWithParent compgen m name ty valReprInfo actualParent =
+    Construct.NewVal(name, m, None, ty, Immutable, compgen, valReprInfo, taccessPublic, ValNotInRecScope, None, NormalVal, [], ValInline.Optional, XmlDoc.Empty, false, false, false, false, false, false, None, actualParent)
 
 //-------------------------------------------------------------------------
 // definitions: TLR, arity, arity-met, arity-short
@@ -196,8 +200,8 @@ module Pass1_DetermineTLRAndArities =
             let arity = Operators.min nFormals nMaxApplied
             if atTopLevel then
                 Some (f, arity)
-            elif g.realsig then
-                None
+            //elif g.realsig then
+            //    None
             else if arity<>0 || not (isNil tps) then
                 Some (f, arity)
             else
@@ -843,7 +847,7 @@ let CreateNewValuesForTLR g tlrS arityM fclassM envPackM =
             assert(g.CompilerGlobalState |> Option.isSome)
             g.CompilerGlobalState.Value.NiceNameGenerator.FreshCompilerGeneratedName(name, m)
 
-        let fHat = mkLocalNameTypeArity f.IsCompilerGenerated m fHatName fHatTy (Some fHatArity)
+        let fHat = mkLocalNameTypeArityWithParent f.IsCompilerGenerated m fHatName fHatTy (Some fHatArity) f.TryDeclaringEntity
         fHat
 
     let fs = Zset.elements tlrS
@@ -953,7 +957,7 @@ module Pass4_RewriteAssembly =
     // pass4: lowertop - convert_vterm_bind on TopLevel binds
     //-------------------------------------------------------------------------
 
-    let AdjustBindToValRepr g (TBind(v, repr, _)) =
+    let AdjustBindToValRepr g (TBind(_newBindingStampCount, v, repr, _)) =
         match v.ValReprInfo with
         | None -> 
             v.SetValReprInfo (Some (InferValReprInfoOfBinding g AllowTypeDirectedDetupling.Yes v repr ))
@@ -970,13 +974,13 @@ module Pass4_RewriteAssembly =
     // To
     //   let f<tps> vss = fHat<f_freeTypars> f_freeVars vss
     //   let fHat<tps> f_freeVars vss = f_body[<f_freeTypars>, f_freeVars]
-    let TransTLRBindings penv (binds: Bindings) =
+    let TransTLRBindings penv (binds: Bindings) =           /// Probably here @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
         let g = penv.g
         if isNil binds then [], [] else
         let fc = BindingGroupSharingSameReqdItems binds
         let envp = Zmap.force fc penv.envPackM ("TransTLRBindings", string)
 
-        let fRebinding (TBind(fOrig, body, letSeqPtOpt)) =
+        let fRebinding (TBind(_newBindingStampCount, fOrig, body, letSeqPtOpt)) =
             let m = fOrig.Range
             let tps, vss, _b, bodyTy = stripTopLambda (body, fOrig.Type)
             let aenvExprs = envp.ep_aenvs |> List.map (exprForVal m)
@@ -995,7 +999,7 @@ module Pass4_RewriteAssembly =
                           aenvExprs @ vsExprs, m), bodyTy)
             fBind
 
-        let fHatNewBinding (shortRecBinds: Bindings) (TBind(f, b, letSeqPtOpt)) =
+        let fHatNewBinding (shortRecBinds: Bindings) (TBind(_newBindingStampCount, f, b, letSeqPtOpt)) =
             let wf = Zmap.force f penv.arityM ("fHatNewBinding - arityM", nameOfVal)
             let fHat = Zmap.force f penv.fHatM  ("fHatNewBinding - fHatM", nameOfVal)
 
@@ -1041,7 +1045,7 @@ module Pass4_RewriteAssembly =
         let fclass = BindingGroupSharingSameReqdItems tlrBs
 
         // Trans each TLR f binding into fHat and f rebind
-        let newTlrBinds, tlrRebinds = TransTLRBindings penv tlrBs
+        let newTlrBinds, tlrRebinds = TransTLRBindings penv tlrBs               /// Probably here @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
         let aenvBinds = GetAEnvBindings penv fclass
 
         // Lower nonTlrBs if they are GTL
@@ -1116,7 +1120,7 @@ module Pass4_RewriteAssembly =
            let expr = TransApp penv (f, fty, tys, args, m)
            expr, z
 
-        | Expr.Val (v, _, m) ->
+        | Expr.Val (v, _a, m) ->
            // consider this a trivial app
            let fx, fty = expr, v.Type
            let expr = TransApp penv (fx, fty, [], [], m)
@@ -1139,14 +1143,14 @@ module Pass4_RewriteAssembly =
             MakePreDecs m pds expr, z (* if TopLevel, lift preDecs over the ilobj expr *)
 
         // lambda, tlambda - explicit lambda terms
-        | Expr.Lambda (_, ctorThisValOpt, baseValOpt, argvs, body, m, bodyTy) ->
+        | Expr.Lambda (_a, ctorThisValOpt, baseValOpt, argvs, body, m, bodyTy) ->
             let z = EnterInner z
             let body, z = TransExpr penv z body
             let z = ExitInner z
             let pds, z = ExtractPreDecs z
             MakePreDecs m pds (rebuildLambda m ctorThisValOpt baseValOpt argvs (body, bodyTy)), z
 
-        | Expr.TyLambda (_, tps, body, m, bodyTy) ->
+        | Expr.TyLambda (_a, tps, body, m, bodyTy) ->
             let z = EnterInner z
             let body, z = TransExpr penv z body
             let z = ExitInner z
@@ -1221,7 +1225,7 @@ module Pass4_RewriteAssembly =
              let z, binds = LiftTopBinds IsRec penv z   binds (* factor Top* repr binds *)
              let z, rebinds = LiftTopBinds IsRec penv z rebinds
              let z, pdsBind = PopPreDecs z
-             let z = SetPreDecs z (TreeNode [pdsPrior;RecursivePreDecs pdsBind pdsRhs])
+             let z = SetPreDecs z (TreeNode [pdsPrior; RecursivePreDecs pdsBind pdsRhs])
              let z = ExitInner z
              let pds, z = ExtractPreDecs z
              // tailcall
@@ -1268,10 +1272,10 @@ module Pass4_RewriteAssembly =
         let z = ExitInner z
         TObjExprMethod(slotsig, attribs, tps, vs, e, m), z
 
-    and TransBindingRhs penv z (TBind(v, e, letSeqPtOpt)) : Binding * RewriteState =
+    and TransBindingRhs penv z (TBind(_newBindingStampCount, v, e, letSeqPtOpt)) : Binding * RewriteState =
         let shouldInline = v.ShouldInline
-        let z, e = EnterShouldInline shouldInline z (fun z -> TransExpr penv z e)
-        TBind (v, e, letSeqPtOpt), z
+        let z, e1 = EnterShouldInline shouldInline z (fun z -> TransExpr penv z e)
+        TBind (newBindingStampCount(), v, e1, letSeqPtOpt), z
 
     and TransDecisionTree penv z x: DecisionTree * RewriteState =
        match x with

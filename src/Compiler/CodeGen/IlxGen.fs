@@ -363,13 +363,9 @@ let useCallVirt (cenv: cenv) boxity (mspec: ILMethodSpec) isBaseCall =
 type CompileLocation =
     {
         Scope: ILScopeRef
-
         TopImplQualifiedName: string
-
         Namespace: string option
-
         Enclosing: string list
-
         QualifiedNameOfFile: string
     }
 
@@ -489,6 +485,7 @@ let TypeRefForCompLoc cloc =
 let mkILTyForCompLoc cloc =
     mkILNonGenericBoxedTy (TypeRefForCompLoc cloc)
 
+
 /// Compute visibility for type members
 /// based on hidden and accessibility from the source code
 /// when hidden and realsig is specified then
@@ -562,25 +559,31 @@ type TypeReprEnv
     static member Empty = empty
 
     /// Reset to the empty environment, where no type parameters are in scope.
-    member eenv.ResetTypars() =
-        TypeReprEnv(count = 0, reprs = Map.empty, templateReplacement = eenv.TemplateReplacement)
+    member tyenv.ResetTypars() =
+        TypeReprEnv(count = 0, reprs = Map.empty, templateReplacement = tyenv.TemplateReplacement)
 
     /// Get the environment for a fixed set of type parameters
-    member eenv.ForTypars tps = eenv.ResetTypars().Add tps
+    member tyenv.ForTypars tps = tyenv.ResetTypars().Add tps
 
     /// Get the environment for within a type definition
-    member eenv.ForTycon(tycon: Tycon) = eenv.ForTypars tycon.TyparsNoRange
+    member tyenv.ForTycon(tycon: Tycon) = tyenv.ForTypars tycon.TyparsNoRange
 
     /// Get the environment for generating a reference to items within a type definition
-    member eenv.ForTyconRef(tcref: TyconRef) = eenv.ForTycon tcref.Deref
+    member tyenv.ForTyconRef(tcref: TyconRef) = tyenv.ForTycon tcref.Deref
 
     /// Get a list of the Typars in this environment
-    member eenv.AsUserProvidedTypars() =
+    member tyenv.AsUserProvidedTypars() =
         reprs
         |> Map.toList
         |> List.map (fun (_, (_, tp)) -> tp)
         |> List.filter (fun tp -> not tp.IsCompilerGenerated)
         |> Zset.ofList typarOrder
+
+    //member tyenv.UserProvideILGenericTypes(m, eenv) =
+    //    reprs
+    //    |> Map.toList
+    //    |> List.map (fun (_, (_, tp)) -> mkTyparTy tp)
+    //    |> GenTypeArgs cenv m eenv.tyenv
 
 //--------------------------------------------------------------------------
 // Generate type references
@@ -1550,7 +1553,14 @@ let ComputeStorageForFSharpFunctionOrFSharpExtensionMember (cenv: cenv) cloc val
     let methodArgTys, paramInfos = curriedArgInfos |> List.concat |> List.unzip
     let ilMethodArgTys = GenParamTypes cenv m tyenvUnderTypars false methodArgTys
     let ilRetTy = GenReturnType cenv m tyenvUnderTypars returnTy
-    let ilLocTy = mkILTyForCompLoc cloc
+    let ilLocTy =
+        (*match g.realsig, (vref.Deref.TryDeclaringEntity) with
+        | true, (Parent parentType) ->
+            let _a = TypeRefForCompLoc cloc
+            let _b = genILGenericArgsList cenv m (parentType.TyparsNoRange)
+            mkILTyForCompLoc cloc//mkILNamedTy AsObject (TypeRefForCompLoc cloc) (GenILGenericArgsList cenv m parentType.TyparsNoRange)
+        | _ -> *)mkILTyForCompLoc cloc
+
     let ilMethodInst = GenTypeArgs cenv m tyenvUnderTypars (List.map mkTyparTy tps)
 
     let mspec =
@@ -1638,7 +1648,8 @@ let ComputeStorageForValWithValReprInfo
                 | _ -> ComputeStorageForFSharpFunctionOrFSharpExtensionMember cenv cloc valReprInfo vref m
 
 /// Determine how an F#-declared value, function or member is represented, if it is in the assembly being compiled.
-let ComputeAndAddStorageForLocalValWithValReprInfo (cenv, intraAssemblyFieldTable, isInteractive, optShadowLocal) cloc (v: Val) eenv =
+let ComputeAndAddStorageForLocalValWithValReprInfo (cenv, intraAssemblyFieldTable, isInteractive, optShadowLocal) cloc (v: Val) (eenv: IlxGenEnv) =
+    let _a = (eenv.tyenv).AsUserProvidedTypars()
     let storage =
         ComputeStorageForValWithValReprInfo(cenv, Some intraAssemblyFieldTable, isInteractive, optShadowLocal, mkLocalValRef v, cloc)
 
@@ -2272,9 +2283,9 @@ type AnonTypeGenerationTable() =
 
             let optimizedExtraBindings =
                 extraBindings
-                |> Array.map (fun (TBind(a, b, c)) ->
+                |> Array.map (fun (TBind(_newBindingStampCount, a, b, c)) ->
                     // Disable method splitting for bindings related to anonymous records
-                    TBind(a, cenv.optimizeDuringCodeGen true b, c))
+                    TBind(newBindingStampCount(), a, cenv.optimizeDuringCodeGen true b, c))
                 |> Array.rev
 
             extraBindingsToGenerate.PushRange(optimizedExtraBindings)
@@ -2888,7 +2899,7 @@ let BindingEmitsNoCode g (b: Binding) = IsFSharpValCompiledAsMethod g b.Var
 ///
 /// Returns (useWholeExprRange, sequencePointForBind, sequencePointGenerationFlagForRhsOfBind)
 let ComputeDebugPointForBinding g bind =
-    let (TBind(_, e, spBind)) = bind
+    let (TBind(_newBindingStampCount, _, e, spBind)) = bind
 
     if BindingEmitsNoCode g bind then
         false, None
@@ -4326,7 +4337,7 @@ and GenApp (cenv: cenv) cgbuf eenv (f, fty, tyargs, curriedArgs, m) sequel =
                 List.splitAt numEnclILTypeArgs ilTyArgs
 
             let boxity = mspec.DeclaringType.Boxity
-            let mspec = mkILMethSpec (mspec.MethodRef, boxity, ilEnclArgTys, ilMethArgTys)
+            let mspec = mkILMethSpec (mspec.MethodRef, boxity, ilEnclArgTys, ilMethArgTys)                  //@@@@@@@@@@@  and here
 
             // "Unit" return types on static methods become "void"
             let mustGenerateUnitAfterCall = Option.isNone returnTy
@@ -4374,7 +4385,7 @@ and GenApp (cenv: cenv) cgbuf eenv (f, fty, tyargs, curriedArgs, m) sequel =
                 | _ ->
                     if newobj then I_newobj(mspec, None)
                     elif useICallVirt then I_callvirt(isTailCall, mspec, None)
-                    else I_call(isTailCall, mspec, None)
+                    else I_call(isTailCall, mspec, None)                                    //@@@@@@@@@
 
             // ok, now we're ready to generate
             if isSuperInit || isSelfInit then
@@ -4759,7 +4770,7 @@ and GenTry cenv cgbuf eenv scopeMarks (e1, m, resultTy, spTry) =
 and eligibleForFilter (cenv: cenv) expr =
     let rec check expr =
         match expr with
-        | Expr.Let(TBind(_, be, _), body, _, _) -> check be && check body
+        | Expr.Let(TBind(_newBindingStampCount, _, be, _), body, _, _) -> check be && check body
         | Expr.DebugPoint(_, expr) -> check expr
         | Expr.Match(_spBind, _exprm, dtree, targets, _, _) ->
             checkDecisionTree dtree
@@ -8322,13 +8333,13 @@ and GenLetRecBindings cenv (cgbuf: CodeGenBuffer) eenv (allBinds: Bindings, m) (
             match remainder with
             | [] -> bindings |> List.rev
             | _ ->
-                let stamp = remainder |> List.head |> (fun (TBind(v, _, _)) -> getStampForVal v)
+                let stamp = remainder |> List.head |> (fun (TBind(_newBindingStampCount, v, _, _)) -> getStampForVal v)
 
                 let taken =
-                    remainder |> List.takeWhile (fun (TBind(v, _, _)) -> stamp = getStampForVal v)
+                    remainder |> List.takeWhile (fun (TBind(_newBindingStampCount, v, _, _)) -> stamp = getStampForVal v)
 
                 let remainder =
-                    remainder |> List.skipWhile (fun (TBind(v, _, _)) -> stamp = getStampForVal v)
+                    remainder |> List.skipWhile (fun (TBind(_newBindingStampCount, v, _, _)) -> stamp = getStampForVal v)
 
                 loopAllBinds (taken :: bindings) remainder
 
@@ -8346,7 +8357,7 @@ and GenLetRecBindings cenv (cgbuf: CodeGenBuffer) eenv (allBinds: Bindings, m) (
                     GenBinding cenv cgbuf eenv bind false
                     updateForwardReferenceSet bind forwardReferenceSet)
             | Some dict, true, _ ->
-                let (TBind(v, _, _)) = binds |> List.head
+                let (TBind(_newBindingStampCount, v, _, _)) = binds |> List.head
 
                 match dict.TryGetValue(getStampForVal v) with
                 | false, _ ->
@@ -8409,7 +8420,7 @@ and ComputeMethodAccessRestrictedBySig eenv vspec =
 
 and GenBindingAfterDebugPoint cenv cgbuf eenv bind isStateVar startMarkOpt =
     let g = cenv.g
-    let (TBind(vspec, rhsExpr, _)) = bind
+    let (TBind(_newBindingStampCount, vspec, rhsExpr, _)) = bind
 
     // Record the closed reflection definition if publishing
     // There is no real reason we're doing this so late in the day
@@ -9956,7 +9967,7 @@ and AllocStorageForBinds cenv cgbuf scopeMarks eenv binds =
 
     eenv
 
-and AllocValForBind cenv cgbuf (scopeMarks: Mark * Mark) eenv (TBind(v, repr, _)) =
+and AllocValForBind cenv cgbuf (scopeMarks: Mark * Mark) eenv (TBind(_newBindingStampCount, v, repr, _)) =
     match v.ValReprInfo with
     | None ->
         let repr, eenv = AllocLocalVal cenv cgbuf v eenv (Some repr) scopeMarks

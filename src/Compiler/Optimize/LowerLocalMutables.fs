@@ -4,7 +4,8 @@ module internal FSharp.Compiler.LowerLocalMutables
 
 open Internal.Utilities.Collections
 open Internal.Utilities.Library.Extras
-open FSharp.Compiler 
+open FSharp.Compiler
+open FSharp.Compiler.CompilerGlobalState
 open FSharp.Compiler.DiagnosticsLogger
 open FSharp.Compiler.TypedTree
 open FSharp.Compiler.TypedTreeBasics
@@ -110,7 +111,7 @@ let DecideExpr cenv exprF noInterceptF z expr  =
         noInterceptF z expr
 
 /// Find all the mutable locals that escape a binding
-let DecideBinding cenv z (TBind(v, expr, _m) as bind) = 
+let DecideBinding cenv z (TBind(_newBindingStampCount, v, expr, _m) as bind) = 
     let valReprInfo  = match bind.Var.ValReprInfo with Some info -> info | _ -> ValReprInfo.emptyValData 
     DecideLambda None cenv valReprInfo expr v.Type z 
 
@@ -161,12 +162,12 @@ let TransformExpr g (heapValMap: ValMap<_>) exprF expr =
     | _ -> None
 
 /// Rewrite bindings for mutable locals which we are transforming
-let TransformBinding g (heapValMap: ValMap<_>) exprF (TBind(v, expr, m)) = 
+let TransformBinding g (heapValMap: ValMap<_>) exprF (TBind(_newBindingStampCount, v, expr, m)) = 
     if heapValMap.ContainsVal v then 
        let nv, _nve = heapValMap[v]
        let exprRange = expr.Range
        let expr = exprF expr
-       Some(TBind(nv, mkRefCell g exprRange v.Type expr, m))
+       Some(TBind(newBindingStampCount(), nv, mkRefCell g exprRange v.Type expr, m))
     else
        None
 
