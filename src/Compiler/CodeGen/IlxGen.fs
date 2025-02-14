@@ -4366,11 +4366,11 @@ and GenApp (cenv: cenv) cgbuf eenv (f, fty, tyargs, curriedArgs, m) sequel =
                 if ilTyArgs.Length < numEnclILTypeArgs then
                     error (InternalError("length mismatch", m))
                 // @@@@@@@@@@@@@@@@@@@@@@@@@@ Nasty test time hack!!!!!!!!!!!! @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
-                let numEnclILTypeArgs =
-                    if ilTyArgs.Length = 3 then
-                        2
-                    else
-                        numEnclILTypeArgs
+                //let numEnclILTypeArgs =
+                //    if ilTyArgs.Length = 3 then
+                //        2
+                //    else
+                //        numEnclILTypeArgs
                 List.splitAt numEnclILTypeArgs ilTyArgs
 
             let ilEnclArgTys, ilMethArgTys =
@@ -8519,7 +8519,7 @@ and GenBindingAfterDebugPoint cenv cgbuf eenv bind isStateVar startMarkOpt =
         GenExpr cenv cgbuf eenv cctorBody discard
 
     | Method(valReprInfo, _, mspec, mspecW, _, ctps, mtps, curriedArgInfos, paramInfos, witnessInfos, argTys, retInfo) when not isStateVar ->
-
+        //@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ Here @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
         let methLambdaTypars, methLambdaCtorThisValOpt, methLambdaBaseValOpt, methLambdaCurriedVars, methLambdaBody, methLambdaBodyTy =
             IteratedAdjustLambdaToMatchValReprInfo g cenv.amap valReprInfo rhsExpr
 
