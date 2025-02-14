@@ -3914,6 +3914,14 @@ type ContainerInfo =
 /// Indicates a declaration is contained in an expression
 let ExprContainerInfo = ContainerInfo(ParentNone, None)
 
+/// Indicates a declaration is contained in the given module 
+let ModuleOrNamespaceContainerInfo modref =
+    ContainerInfo(Parent modref, Some(MemberOrValContainerInfo(modref, None, None, NoSafeInitInfo, [])))
+
+/// Indicates a declaration is contained in the given type definition in the given module 
+let TyconContainerInfo (parent, tcref, declaredTyconTypars, safeInitInfo) =
+    ContainerInfo(parent, Some(MemberOrValContainerInfo(tcref, None, None, safeInitInfo, declaredTyconTypars)))
+
 type NormalizedRecBindingDefn =
     | NormalizedRecBindingDefn of
         containerInfo: ContainerInfo *
@@ -10590,6 +10598,11 @@ and TcLinearExprs bodyChecker cenv env overallTy tpenv isCompExpr synExpr cont =
             // TcLinearExprs processes at most one recursive binding, this is not tailcalling
             CheckRecursiveBindingIds binds
             let binds = List.map (fun x -> RecDefnBindingInfo(ExprContainerInfo, NoNewSlots, ExpressionBinding, x)) binds
+            //let containerInfo =
+            //    match g.realsig, env.reqdThisValTyOpt with
+            //    | true, Some (TType_app(pref, _, _)) -> TyconContainerInfo(Parent pref, pref, [], NoSafeInitInfo)
+            //    | _ -> ExprContainerInfo
+            //let binds = List.map (fun x -> RecDefnBindingInfo(containerInfo, NoNewSlots, ExpressionBinding, x)) binds
             if isUse then errorR(Error(FSComp.SR.tcBindingCannotBeUseAndRec(), m))
             let binds, envinner, tpenv = TcLetrecBindings ErrorOnOverrides cenv env tpenv (binds, m, m)
             let envinner = { envinner with eIsControlFlow = true }
@@ -12280,6 +12293,8 @@ and TcLetrecBinding
 
          // This is the actual binding to check
          (rbind: PreCheckingRecursiveBinding) =
+
+    let envRec = { envRec with reqdThisValTyOpt = reqdThisValTyOpt }
 
     let g = cenv.g
 

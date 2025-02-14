@@ -172,6 +172,12 @@ type ContainerInfo =
 
 val ExprContainerInfo: ContainerInfo
 
+/// Indicates a declaration is contained in the given module 
+val ModuleOrNamespaceContainerInfo: modref: EntityRef -> ContainerInfo
+
+/// Indicates a declaration is contained in the given type definition in the given module 
+val TyconContainerInfo: parent: ParentRef * tcref: TyconRef * declaredTyconTypars: Typars * safeInitInfo: SafeInitData -> ContainerInfo
+
 /// Indicates if member declarations are allowed to be abstract members.
 type NewSlotsOK =
     | NewSlotsOK

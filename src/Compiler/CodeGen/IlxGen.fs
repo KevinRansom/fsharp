@@ -4346,6 +4346,9 @@ and GenApp (cenv: cenv) cgbuf eenv (f, fty, tyargs, curriedArgs, m) sequel =
                     mspecW
 
             let ilTyArgs = GenTypeArgs cenv m eenv.tyenv tyargs
+            let enclosingIlTyArgs = mspec.DeclaringType.GenericArgs
+
+            //let _ilEnclosingTypeTypeArgs = GenTypeArgs cenv m eenv.tyenv tyargs
 
             // For instance method calls chop off some type arguments, which are already
             // carried by the class.  Also work out if it's a virtual call.
@@ -4362,8 +4365,17 @@ and GenApp (cenv: cenv) cgbuf eenv (f, fty, tyargs, curriedArgs, m) sequel =
             let ilEnclArgTys, ilMethArgTys =
                 if ilTyArgs.Length < numEnclILTypeArgs then
                     error (InternalError("length mismatch", m))
-
+                // @@@@@@@@@@@@@@@@@@@@@@@@@@ Nasty test time hack!!!!!!!!!!!! @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+                let numEnclILTypeArgs =
+                    if ilTyArgs.Length = 3 then
+                        2
+                    else
+                        numEnclILTypeArgs
                 List.splitAt numEnclILTypeArgs ilTyArgs
+
+            let ilEnclArgTys, ilMethArgTys =
+                let ilEnclArgTys = ilEnclArgTys
+                ilEnclArgTys, ilMethArgTys
 
             let boxity = mspec.DeclaringType.Boxity
             let mspec = mkILMethSpec (mspec.MethodRef, boxity, ilEnclArgTys, ilMethArgTys)
@@ -9225,6 +9237,7 @@ and GenMethodForBinding
      methLambdaBody,
      returnTy)
     =
+    
     let g = cenv.g
     let m = v.Range
 
