@@ -4365,17 +4365,15 @@ and GenApp (cenv: cenv) cgbuf eenv (f, fty, tyargs, curriedArgs, m) sequel =
             let ilEnclArgTys, ilMethArgTys =
                 if ilTyArgs.Length < numEnclILTypeArgs then
                     error (InternalError("length mismatch", m))
-                // @@@@@@@@@@@@@@@@@@@@@@@@@@ Nasty test time hack!!!!!!!!!!!! @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
-                //let numEnclILTypeArgs =
-                //    if ilTyArgs.Length = 3 then
-                //        2
-                //    else
-                //        numEnclILTypeArgs
-                List.splitAt numEnclILTypeArgs ilTyArgs
 
-            let ilEnclArgTys, ilMethArgTys =
-                let ilEnclArgTys = ilEnclArgTys
-                ilEnclArgTys, ilMethArgTys
+                // @@@@@@@@@@@@@@@@@@@@@@@@@@ Nasty test time hack!!!!!!!!!!!! @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+                let numEnclILTypeArgs =
+                    if ilTyArgs.Length = 3 then
+                        2
+                    else
+                        numEnclILTypeArgs
+                let enc, meth = List.splitAt numEnclILTypeArgs ilTyArgs
+                enc, ilTyArgs
 
             let boxity = mspec.DeclaringType.Boxity
             let mspec = mkILMethSpec (mspec.MethodRef, boxity, ilEnclArgTys, ilMethArgTys)
@@ -9237,7 +9235,6 @@ and GenMethodForBinding
      methLambdaBody,
      returnTy)
     =
-    
     let g = cenv.g
     let m = v.Range
 
@@ -9641,6 +9638,14 @@ and GenMethodForBinding
 
             | _ ->
                 let mdef =
+                    // @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+                    //let ilTypars =
+                    //    if ilTypars.Length = 3 then
+                    //        ilTypars |> List.skip 2
+                    //    else
+                    //        ilTypars
+                    // @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
                     mkILStaticMethod (ilTypars, methName, access, ilParams, ilReturn, ilMethodBody)
 
                 // For extension properties, also emit attrsAppliedToGetterOrSetter on the getter or setter method
