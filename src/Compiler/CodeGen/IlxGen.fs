@@ -61,6 +61,13 @@ let DropErasedTyargs tys =
         | TType_measure _ -> false
         | _ -> true)
 
+let rec stripPrefix (a: 'a list) (b: 'b list) (compare: 'a * 'b -> bool) =
+    match a, b with
+    | [], _ -> b
+    | _, [] -> []
+    | ah :: at, bh :: bt when compare (ah, bh) -> stripPrefix at bt compare
+    | _ -> b
+
 let AddNonUserCompilerGeneratedAttribs (g: TcGlobals) (mdef: ILMethodDef) = g.AddMethodGeneratedAttributes mdef
 
 let debugDisplayMethodName = "__DebugDisplay"
@@ -575,12 +582,11 @@ type TypeReprEnv
     member eenv.ForTyconRef(tcref: TyconRef) = eenv.ForTycon tcref.Deref
 
     /// Get a list of the Typars in this environment
-    member eenv.AsUserProvidedTypars() =
+    member eenv.AsTypars() =
         reprs
         |> Map.toList
         |> List.map (fun (_, (_, tp)) -> tp)
         |> List.filter (fun tp -> not tp.IsCompilerGenerated)
-        |> Zset.ofList typarOrder
 
 //--------------------------------------------------------------------------
 // Generate type references
@@ -1550,6 +1556,7 @@ let ComputeStorageForFSharpValue cenv cloc optIntraAssemblyInfo optShadowLocal i
 
 /// Compute the representation information for an F#-declared member
 let ComputeStorageForFSharpMember cenv valReprInfo memberInfo (vref: ValRef) m =
+    //do if (*vref.DisplayName.Equals("Finish") ||*) vref.DisplayName.Equals("``iter@272``") then System.Diagnostics.Debugger.Break()
     let mspec, mspecW, ctps, mtps, curriedArgInfos, paramInfos, retInfo, witnessInfos, methodArgTys, _ =
         GetMethodSpecForMemberVal cenv memberInfo vref
 
@@ -1558,7 +1565,9 @@ let ComputeStorageForFSharpMember cenv valReprInfo memberInfo (vref: ValRef) m =
 /// Compute the representation information for an F#-declared function in a module or an F#-declared extension member.
 /// Note, there is considerable overlap with ComputeStorageForFSharpMember/GetMethodSpecForMemberVal and these could be
 /// rationalized.
-let ComputeStorageForFSharpFunctionOrFSharpExtensionMember (cenv: cenv) cloc valReprInfo (vref: ValRef) m =
+let ComputeStorageForFSharpFunctionOrFSharpExtensionMember (cenv: cenv) cloc valReprInfo (vref: ValRef) m eenv =
+    //@@@@@@@@@@@@@@@@@@@@@@@@@ yeah important!!!! maybe
+    //do if (*vref.DisplayName.Equals("Finish") ||*) vref.DisplayName.Equals("``iter@272``") then System.Diagnostics.Debugger.Break()
     let g = cenv.g
     let nm = vref.CompiledName g.CompilerGlobalState
     let numEnclosingTypars = CountEnclosingTyparsOfActualParentOfVal vref.Deref
@@ -1566,7 +1575,7 @@ let ComputeStorageForFSharpFunctionOrFSharpExtensionMember (cenv: cenv) cloc val
     let tps, witnessInfos, curriedArgInfos, returnTy, retInfo =
         GetValReprTypeInCompiledForm g valReprInfo numEnclosingTypars vref.Type m
 
-    let tyenvUnderTypars = TypeReprEnv.Empty.ForTypars tps
+    let tyenvUnderTypars = TypeReprEnv.Empty.ForTypars tps      //@@@@@@@@@@@@@@@@@@@@@
     let methodArgTys, paramInfos = curriedArgInfos |> List.concat |> List.unzip
     let ilMethodArgTys = GenParamTypes cenv m tyenvUnderTypars false methodArgTys
     let ilRetTy = GenReturnType cenv m tyenvUnderTypars returnTy
@@ -1604,9 +1613,17 @@ let IsFSharpValCompiledAsMethod g (v: Val) =
 /// method (possibly and instance method). Otherwise it gets represented as a
 /// static field and property.
 let ComputeStorageForValWithValReprInfo
-    (cenv, optIntraAssemblyInfo: IlxGenIntraAssemblyInfo option, isInteractive, optShadowLocal, vref: ValRef, cloc)
-    =
+    (
+        cenv,
+        optIntraAssemblyInfo: IlxGenIntraAssemblyInfo option,
+        isInteractive,
+        optShadowLocal,
+        vref: ValRef,
+        cloc,
+        eenv
+    ) =
 
+    //do if (*vref.DisplayName.Equals("Finish") ||*) vref.DisplayName.Equals("``iter@272``") then System.Diagnostics.Debugger.Break()
     if
         isUnitTy cenv.g vref.Type
         && not vref.IsMemberOrModuleBinding
@@ -1614,6 +1631,8 @@ let ComputeStorageForValWithValReprInfo
     then
         Null
     else
+        let m = vref.Range
+        let nm = vref.CompiledName cenv.g.CompilerGlobalState
         let valReprInfo =
             match vref.ValReprInfo with
             | None ->
@@ -1624,10 +1643,13 @@ let ComputeStorageForValWithValReprInfo
                         vref.Range
                     )
                 )
-            | Some a -> a
-
-        let m = vref.Range
-        let nm = vref.CompiledName cenv.g.CompilerGlobalState
+            | Some vr ->
+                match cenv.g.realsig, vref.ApparentEnclosingEntity with
+                | true, Parent parent when not (vref.IsMemberOrModuleBinding) && vref.IsCompiledAsTopLevel ->
+                    let envTypeArs = eenv.tyenv.AsTypars() |> List.map(fun typar -> TyparReprInfo(typar.Id, typar.Kind))
+                    let (ValReprInfo(_typars, args, result)) = vr
+                    ValReprInfo(envTypeArs, args, result)
+                | _ -> vr
 
         if vref.Deref.IsCompiledAsStaticPropertyWithoutField then
             let nm = "get_" + nm
@@ -1649,23 +1671,23 @@ let ComputeStorageForValWithValReprInfo
             | _ ->
                 match vref.MemberInfo with
                 | Some memberInfo when not vref.IsExtensionMember -> ComputeStorageForFSharpMember cenv valReprInfo memberInfo vref m
-                | _ -> ComputeStorageForFSharpFunctionOrFSharpExtensionMember cenv cloc valReprInfo vref m
+                | _ -> ComputeStorageForFSharpFunctionOrFSharpExtensionMember cenv cloc valReprInfo vref m eenv
 
 /// Determine how an F#-declared value, function or member is represented, if it is in the assembly being compiled.
 let ComputeAndAddStorageForLocalValWithValReprInfo (cenv, intraAssemblyFieldTable, isInteractive, optShadowLocal) cloc (v: Val) eenv =
     let storage =
-        ComputeStorageForValWithValReprInfo(cenv, Some intraAssemblyFieldTable, isInteractive, optShadowLocal, mkLocalValRef v, cloc)
+        ComputeStorageForValWithValReprInfo(cenv, Some intraAssemblyFieldTable, isInteractive, optShadowLocal, mkLocalValRef v, cloc, eenv)
 
     AddStorageForVal cenv.g (v, notlazy storage) eenv
 
 /// Determine how an F#-declared value, function or member is represented, if it is an external assembly.
-let ComputeStorageForNonLocalVal cenv cloc modref (v: Val) =
+let ComputeStorageForNonLocalVal cenv cloc modref (v: Val) eenv =
     match v.ValReprInfo with
     | None -> error (InternalError("ComputeStorageForNonLocalVal, expected an ValReprInfo for " + v.LogicalName, v.Range))
-    | Some _ -> ComputeStorageForValWithValReprInfo(cenv, None, false, NoShadowLocal, mkNestedValRef modref v, cloc)
+    | Some _ -> ComputeStorageForValWithValReprInfo(cenv, None, false, NoShadowLocal, mkNestedValRef modref v, cloc, eenv)
 
 /// Determine how all the F#-declared top level values, functions and members are represented, for an external module or namespace.
-let rec AddStorageForNonLocalModuleOrNamespaceRef cenv cloc acc (modref: ModuleOrNamespaceRef) (modul: ModuleOrNamespace) =
+let rec AddStorageForNonLocalModuleOrNamespaceRef cenv cloc acc (modref: ModuleOrNamespaceRef) (modul: ModuleOrNamespace) eenv =
     let acc =
         (acc, modul.ModuleOrNamespaceType.ModuleAndNamespaceDefinitions)
         ||> List.fold (fun acc smodul ->
@@ -1674,12 +1696,13 @@ let rec AddStorageForNonLocalModuleOrNamespaceRef cenv cloc acc (modref: ModuleO
                 (CompLocForSubModuleOrNamespace cloc smodul)
                 acc
                 (modref.NestedTyconRef smodul)
-                smodul)
+                smodul
+                eenv)
 
     let acc =
         (acc, modul.ModuleOrNamespaceType.AllValsAndMembers)
         ||> Seq.fold (fun acc v ->
-            AddStorageForVal cenv.g (v, InterruptibleLazy(fun _ -> ComputeStorageForNonLocalVal cenv cloc modref v)) acc)
+            AddStorageForVal cenv.g (v, InterruptibleLazy(fun _ -> ComputeStorageForNonLocalVal cenv cloc modref v eenv)) acc)
 
     acc
 
@@ -1695,7 +1718,7 @@ let AddStorageForExternalCcu cenv eenv (ccu: CcuThunk) =
                 (fun smodul acc ->
                     let cloc = CompLocForSubModuleOrNamespace cloc smodul
                     let modref = mkNonLocalCcuRootEntityRef ccu smodul
-                    AddStorageForNonLocalModuleOrNamespaceRef cenv cloc acc modref smodul)
+                    AddStorageForNonLocalModuleOrNamespaceRef cenv cloc acc modref smodul eenv)
                 ccu.RootModulesAndNamespaces
                 eenv
 
@@ -1704,7 +1727,7 @@ let AddStorageForExternalCcu cenv eenv (ccu: CcuThunk) =
 
             (eenv, ccu.Contents.ModuleOrNamespaceType.AllValsAndMembers)
             ||> Seq.fold (fun acc v ->
-                AddStorageForVal cenv.g (v, InterruptibleLazy(fun _ -> ComputeStorageForNonLocalVal cenv cloc eref v)) acc)
+                AddStorageForVal cenv.g (v, InterruptibleLazy(fun _ -> ComputeStorageForNonLocalVal cenv cloc eref v eenv)) acc)
 
         eenv
 
@@ -2918,7 +2941,10 @@ let ComputeDebugPointForBinding g bind =
 // Generate expressions
 //-------------------------------------------------------------------------
 
-let rec GenExpr cenv cgbuf eenv (expr: Expr) sequel =
+let rec GenExpr cenv (cgbuf: CodeGenBuffer) eenv (expr: Expr) sequel =
+
+    //@@@@@if cgbuf.MethodName.Equals("Finish") || cgbuf.MethodName.Equals("iter@272") then System.Diagnostics.Debugger.Break()
+
     cenv.stackGuard.Guard
     <| fun () ->
 
@@ -4302,6 +4328,8 @@ and GenApp (cenv: cenv) cgbuf eenv (f, fty, tyargs, curriedArgs, m) sequel =
         match storage with
         | Method(valReprInfo, vref, mspec, mspecW, _, ctps, mtps, curriedArgInfos, _, _, _, _) ->
 
+            if vref.DisplayName.Contains("iter@272") then System.Diagnostics.Debugger.Break()
+
             let nowArgs, laterArgs = List.splitAt curriedArgInfos.Length curriedArgs
 
             let actualRetTy = applyTys cenv.g vref.Type (tyargs, nowArgs)
@@ -4335,7 +4363,12 @@ and GenApp (cenv: cenv) cgbuf eenv (f, fty, tyargs, curriedArgs, m) sequel =
                 if ilTyArgs.Length < numEnclILTypeArgs then
                     error (InternalError("length mismatch", m))
 
-                List.splitAt numEnclILTypeArgs ilTyArgs
+                match g.realsig, vref.ApparentEnclosingEntity with
+                | true, Parent parent when not (vref.IsMemberOrModuleBinding) && vref.IsCompiledAsTopLevel ->
+                    let envTypeArgs = GenTypeArgs cenv m eenv.tyenv (eenv.tyenv.AsTypars() |> List.map mkTyparTy)
+                    //@@@@@                    let ilTyArgs = stripPrefix envTypeArgs ilTyArgs (fun (a, b) -> a = b)
+                    envTypeArgs, ilTyArgs
+                | _ -> List.splitAt numEnclILTypeArgs ilTyArgs
 
             let boxity = mspec.DeclaringType.Boxity
             let mspec = mkILMethSpec (mspec.MethodRef, boxity, ilEnclArgTys, ilMethArgTys)
@@ -6906,7 +6939,7 @@ and GetIlxClosureFreeVars cenv m (thisVars: ValRef list) boxity eenv takenNames 
         | _ -> newUnique ()
 
     // Choose a name for the closure
-    let ilCloTypeRef, initialFreeTyvars =
+    let ilCloTypeRef =
         let boundvar =
             eenv.letBoundVars |> List.tryFind (fun v -> not v.IsCompilerGenerated)
 
@@ -6925,15 +6958,7 @@ and GetIlxClosureFreeVars cenv m (thisVars: ValRef list) boxity eenv takenNames 
 
         let ilCloTypeRef = NestedTypeRefForCompLoc eenv.cloc cloName
 
-        let initialFreeTyvars =
-            match g.realsig with
-            | true ->
-                { emptyFreeTyvars with
-                    FreeTypars = eenv.tyenv.AsUserProvidedTypars()
-                }
-            | false -> emptyFreeTyvars
-
-        ilCloTypeRef, initialFreeTyvars
+        ilCloTypeRef
 
     // Collect the free variables of the closure
     let cloFreeVarResults =
@@ -6944,12 +6969,7 @@ and GetIlxClosureFreeVars cenv m (thisVars: ValRef list) boxity eenv takenNames 
             | None -> opts
             | Some(tcref, _, typars, _) -> opts.WithTemplateReplacement(tyconRefEq g tcref, typars)
 
-        accFreeInExpr
-            opts
-            expr
-            { emptyFreeVars with
-                FreeTyvars = initialFreeTyvars
-            }
+        accFreeInExpr opts expr emptyFreeVars
 
     // Partition the free variables when some can be accessed from places besides the immediate environment
     // Also filter out the current value being bound, if any, as it is available from the "this"
@@ -8452,6 +8472,8 @@ and GenBindingAfterDebugPoint cenv cgbuf eenv bind isStateVar startMarkOpt =
 
     | Method(valReprInfo, _, mspec, mspecW, _, ctps, mtps, curriedArgInfos, paramInfos, witnessInfos, argTys, retInfo) when not isStateVar ->
 
+        do if (*mspec.Name.Equals("Finish") ||*) mspec.Name.Equals("``iter@272``") then System.Diagnostics.Debugger.Break()
+
         let methLambdaTypars, methLambdaCtorThisValOpt, methLambdaBaseValOpt, methLambdaCurriedVars, methLambdaBody, methLambdaBodyTy =
             IteratedAdjustLambdaToMatchValReprInfo g cenv.amap valReprInfo rhsExpr
 
@@ -9147,27 +9169,28 @@ and GenMethodForBinding
     cenv
     mgbuf
     eenv
-    (
-        v: Val,
-        mspec,
-        hasWitnessEntry,
-        generateWitnessArgs,
-        access,
-        ctps,
-        mtps,
-        witnessInfos,
-        curriedArgInfos,
-        paramInfos,
-        argTys,
-        retInfo,
-        valReprInfo,
-        ctorThisValOpt,
-        baseValOpt,
-        methLambdaTypars,
-        methLambdaVars,
-        methLambdaBody,
-        returnTy
-    ) =
+    (v: Val,
+     mspec,
+     hasWitnessEntry,
+     generateWitnessArgs,
+     access,
+     ctps,
+     mtps,
+     witnessInfos,
+     curriedArgInfos,
+     paramInfos,
+     argTys,
+     retInfo,
+     valReprInfo,
+     ctorThisValOpt,
+     baseValOpt,
+     methLambdaTypars,
+     methLambdaVars,
+     methLambdaBody,
+     returnTy)
+    =
+    //do if (*v.DisplayName.Equals("Finish") ||*) v.DisplayName.Equals("``iter@272``") then System.Diagnostics.Debugger.Break()
+
     let g = cenv.g
     let m = v.Range
 
@@ -9302,6 +9325,7 @@ and GenMethodForBinding
                 | _ -> None
 
             let ilLazyCode =
+                //if (*v.DisplayName.Equals("Finish") ||*) v.DisplayName.Equals("``iter@272``") then System.Diagnostics.Debugger.Break()
                 DelayCodeGenMethodForExpr cenv mgbuf (tailCallInfo, mspec.Name, eenvForMeth, 0, selfValOpt, bodyExpr, sequel)
 
             // This is the main code generation for most methods
@@ -9364,7 +9388,14 @@ and GenMethodForBinding
             | _ -> ()
         ]
 
-    let ilTypars = GenGenericParams cenv eenvUnderMethLambdaTypars methLambdaTypars
+    let ilTypars =
+        (*@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+        match cenv.g.realsig, v.ApparentEnclosingEntity with
+        | true, Parent apparentEnclosingEntity ->
+            GenGenericParams cenv eenvUnderMethLambdaTypars (stripPrefix apparentEnclosingEntity.TyparsNoRange methLambdaTypars (fun (a:Typar, b:Typar) -> a.Stamp = b.Stamp))
+        | _ ->
+        @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@*)
+        GenGenericParams cenv eenvUnderMethLambdaTypars methLambdaTypars
 
     let ilParams =
         GenParams cenv eenvUnderMethTypeTypars m mspec witnessInfos paramInfos argTys (Some nonUnitNonSelfMethodVars)
