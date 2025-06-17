@@ -1565,7 +1565,7 @@ let ComputeStorageForFSharpMember cenv valReprInfo memberInfo (vref: ValRef) m =
 /// Compute the representation information for an F#-declared function in a module or an F#-declared extension member.
 /// Note, there is considerable overlap with ComputeStorageForFSharpMember/GetMethodSpecForMemberVal and these could be
 /// rationalized.
-let ComputeStorageForFSharpFunctionOrFSharpExtensionMember (cenv: cenv) cloc valReprInfo (vref: ValRef) m eenv =
+let ComputeStorageForFSharpFunctionOrFSharpExtensionMember (cenv: cenv) cloc valReprInfo (vref: ValRef) m _eenv =
     //@@@@@@@@@@@@@@@@@@@@@@@@@ yeah important!!!! maybe
     //do if (*vref.DisplayName.Equals("Finish") ||*) vref.DisplayName.Equals("``iter@272``") then System.Diagnostics.Debugger.Break()
     let g = cenv.g
@@ -1645,7 +1645,7 @@ let ComputeStorageForValWithValReprInfo
                 )
             | Some vr ->
                 match cenv.g.realsig, vref.ApparentEnclosingEntity with
-                | true, Parent parent when not (vref.IsMemberOrModuleBinding) && vref.IsCompiledAsTopLevel ->
+                | true, Parent _parent when not (vref.IsMemberOrModuleBinding) && vref.IsCompiledAsTopLevel ->
                     let envTypeArs = eenv.tyenv.AsTypars() |> List.map(fun typar -> TyparReprInfo(typar.Id, typar.Kind))
                     let (ValReprInfo(_typars, args, result)) = vr
                     ValReprInfo(envTypeArs, args, result)
@@ -4364,7 +4364,7 @@ and GenApp (cenv: cenv) cgbuf eenv (f, fty, tyargs, curriedArgs, m) sequel =
                     error (InternalError("length mismatch", m))
 
                 match g.realsig, vref.ApparentEnclosingEntity with
-                | true, Parent parent when not (vref.IsMemberOrModuleBinding) && vref.IsCompiledAsTopLevel ->
+                | true, Parent _parent when not (vref.IsMemberOrModuleBinding) && vref.IsCompiledAsTopLevel ->
                     let envTypeArgs = GenTypeArgs cenv m eenv.tyenv (eenv.tyenv.AsTypars() |> List.map mkTyparTy)
                     //@@@@@                    let ilTyArgs = stripPrefix envTypeArgs ilTyArgs (fun (a, b) -> a = b)
                     envTypeArgs, ilTyArgs

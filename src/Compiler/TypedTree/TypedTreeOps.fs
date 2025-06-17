@@ -1354,7 +1354,7 @@ let mkCond spBind m ty e1 e2 e3 =
 
 let exprForValRef m vref = Expr.Val (vref, NormalValUse, m)
 let exprForVal m v = exprForValRef m (mkLocalValRef v)
-    let mkLocalAux m s ty mut compgen parentRef =
+let mkLocalAux m s ty mut compgen parentRef =
     let thisv = Construct.NewVal(s, m, None, ty, mut, compgen, None, taccessPublic, ValNotInRecScope, None, NormalVal, [], ValInline.Optional, XmlDoc.Empty, false, false, false, false, false, false, None, parentRef) 
     thisv, exprForVal m thisv
 
