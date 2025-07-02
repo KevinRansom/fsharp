@@ -6292,7 +6292,7 @@ type Construct() =
         konst,
         actualParent) : Val =
 
-        do if (*logicalName.Equals("Finish") || *)logicalName.Contains("iter@272") then System.Diagnostics.Debugger.Break()
+       // do if (*logicalName.Equals("Finish") || *)logicalName.Contains("iter@272") then System.Diagnostics.Debugger.Break()
 
         let stamp = newStamp()
         let optData = 

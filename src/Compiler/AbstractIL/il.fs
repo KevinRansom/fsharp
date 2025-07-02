@@ -3579,7 +3579,9 @@ type ILGlobals(primaryScopeRef: ILScopeRef, equivPrimaryAssemblyRefs: ILAssembly
 let mkILGlobals (primaryScopeRef, equivPrimaryAssemblyRefs, fsharpCoreAssemblyScopeRef) =
     ILGlobals(primaryScopeRef, equivPrimaryAssemblyRefs, fsharpCoreAssemblyScopeRef)
 
-let mkNormalCall mspec = I_call(Normalcall, mspec, None)
+let mkNormalCall mspec =
+    if mspec.ToString().Contains("iter@272") then System.Diagnostics.Debugger.Break() else ()
+    I_call(Normalcall, mspec, None)
 
 let mkNormalCallvirt mspec = I_callvirt(Normalcall, mspec, None)
 
@@ -3943,6 +3945,7 @@ let mkILNonGenericEmptyCtor (superTy, tag, imports) =
 // --------------------------------------------------------------------
 
 let mkILStaticMethod (genparams, nm, access, args, ret, impl) =
+    do if nm.ToString().Contains("iter@272") then System.Diagnostics.Debugger.Break()
     ILMethodDef(
         genericParams = genparams,
         name = nm,

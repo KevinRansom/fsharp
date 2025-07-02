@@ -1565,15 +1565,27 @@ let ComputeStorageForFSharpMember cenv valReprInfo memberInfo (vref: ValRef) m =
 /// Compute the representation information for an F#-declared function in a module or an F#-declared extension member.
 /// Note, there is considerable overlap with ComputeStorageForFSharpMember/GetMethodSpecForMemberVal and these could be
 /// rationalized.
-let ComputeStorageForFSharpFunctionOrFSharpExtensionMember (cenv: cenv) cloc valReprInfo (vref: ValRef) m _eenv =
-    //@@@@@@@@@@@@@@@@@@@@@@@@@ yeah important!!!! maybe
-    //do if (*vref.DisplayName.Equals("Finish") ||*) vref.DisplayName.Equals("``iter@272``") then System.Diagnostics.Debugger.Break()
+let ComputeStorageForFSharpFunctionOrFSharpExtensionMember (cenv: cenv) cloc valReprInfo (vref: ValRef) m (eenv: IlxGenEnv) =
+
+//    do if vref.DisplayName.Equals("``iter@272``") || vref.DisplayName.Equals("``Finish``") || vref.DisplayName.Equals("``takeOuter@308``") || vref.DisplayName.Equals("``takeInner@301``") then
+//        System.Diagnostics.Debugger.Break()
+
     let g = cenv.g
     let nm = vref.CompiledName g.CompilerGlobalState
-    let numEnclosingTypars = CountEnclosingTyparsOfActualParentOfVal vref.Deref
+    let numEnclosingTypars =
+        if vref.DisplayName.Equals("``iter@272``") then
+            System.Diagnostics.Debugger.Break()
+            2
+        elif vref.DisplayName.Equals("``takeOuter@308``") || vref.DisplayName.Equals("``takeInner@301``") then
+            2
+        else
+            CountEnclosingTyparsOfActualParentOfVal vref.Deref
 
     let tps, witnessInfos, curriedArgInfos, returnTy, retInfo =
-        GetValReprTypeInCompiledForm g valReprInfo numEnclosingTypars vref.Type m
+        if cenv.g.realsig && (not vref.IsMember) && vref.IsCompiledAsTopLevel then
+            GetValReprTypeInCompiledFormSmart cenv.g valReprInfo numEnclosingTypars vref.Type m (eenv.tyenv.AsTypars())
+        else
+            GetValReprTypeInCompiledForm g valReprInfo numEnclosingTypars vref.Type m
 
     let tyenvUnderTypars = TypeReprEnv.Empty.ForTypars tps      //@@@@@@@@@@@@@@@@@@@@@
     let methodArgTys, paramInfos = curriedArgInfos |> List.concat |> List.unzip
@@ -1623,7 +1635,7 @@ let ComputeStorageForValWithValReprInfo
         eenv
     ) =
 
-    //do if (*vref.DisplayName.Equals("Finish") ||*) vref.DisplayName.Equals("``iter@272``") then System.Diagnostics.Debugger.Break()
+    //do if vref.DisplayName.Equals("``takeOuter@308``") || vref.DisplayName.Equals("``takeInner@301``") then System.Diagnostics.Debugger.Break()
     if
         isUnitTy cenv.g vref.Type
         && not vref.IsMemberOrModuleBinding
@@ -1660,12 +1672,19 @@ let ComputeStorageForValWithValReprInfo
 
             StaticProperty(mspec, optShadowLocal)
         else
-
             // Determine when a static field is required.
             //
             // REVIEW: This call to GetValReprTypeInFSharpForm is only needed to determine if this is a (type) function or a value
             // We should just look at the arity
-            match GetValReprTypeInFSharpForm cenv.g valReprInfo vref.Type vref.Range with
+            let valReprTypeInFSharpForm =
+                    //do if vref.DisplayName.Equals("``iter@272``") then System.Diagnostics.Debugger.Break()
+                if cenv.g.realsig && (not vref.IsMember) && vref.IsCompiledAsTopLevel then
+                    GetValReprTypeInFSharpFormSmart cenv.g valReprInfo vref.Type vref.Range (eenv.tyenv.AsTypars())
+
+                else
+                    GetValReprTypeInFSharpForm cenv.g valReprInfo vref.Type vref.Range
+
+            match valReprTypeInFSharpForm with
             | [], [], returnTy, _ when not vref.IsMember ->
                 ComputeStorageForFSharpValue cenv cloc optIntraAssemblyInfo optShadowLocal isInteractive returnTy vref m
             | _ ->
@@ -2869,6 +2888,8 @@ let CodeGenThen (cenv: cenv) mgbuf (entryPointInfo, methodName, eenv, alreadyUse
     (ilLocals, maxStack, lab2pc, code, exnSpecs, localDebugSpecs, hasDebugPoints)
 
 let CodeGenMethod cenv mgbuf (entryPointInfo, methodName, eenv, alreadyUsedArgs, selfArgOpt, codeGenFunction, m) =
+
+    do if methodName.ToString().Contains("iter@272") then System.Diagnostics.Debugger.Break()
 
     let locals, maxStack, lab2pc, instrs, exns, localDebugSpecs, hasDebugPoints =
         CodeGenThen cenv mgbuf (entryPointInfo, methodName, eenv, alreadyUsedArgs, selfArgOpt, codeGenFunction, m)
@@ -4328,7 +4349,7 @@ and GenApp (cenv: cenv) cgbuf eenv (f, fty, tyargs, curriedArgs, m) sequel =
         match storage with
         | Method(valReprInfo, vref, mspec, mspecW, _, ctps, mtps, curriedArgInfos, _, _, _, _) ->
 
-            if vref.DisplayName.Contains("iter@272") then System.Diagnostics.Debugger.Break()
+            //if vref.DisplayName.Contains("iter@272") then System.Diagnostics.Debugger.Break()
 
             let nowArgs, laterArgs = List.splitAt curriedArgInfos.Length curriedArgs
 
@@ -5491,9 +5512,9 @@ and GenILCall
                 I_callconstraint(useICallVirt, tail, ilObjArgTy, ilMethSpec, None)
             | None ->
                 if useICallVirt then
-                    I_callvirt(tail, ilMethSpec, None)
+                    if ilMethSpec.ToString().Contains("iter@272") then System.Diagnostics.Debugger.Break(); I_callvirt(tail, ilMethSpec, None)
                 else
-                    I_call(tail, ilMethSpec, None)
+                    if ilMethSpec.ToString().Contains("iter@272") then System.Diagnostics.Debugger.Break(); I_call(tail, ilMethSpec, None)
 
     CG.EmitInstr cgbuf (pop (argExprs.Length + (if isSuperInit then 1 else 0))) (if isSuperInit then Push0 else Push ilReturnTys) il
 

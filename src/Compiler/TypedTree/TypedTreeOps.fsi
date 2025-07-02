@@ -775,17 +775,18 @@ val GetTopTauTypeInFSharpForm: TcGlobals -> ArgReprInfo list list -> TType -> ra
 val GetValReprTypeInFSharpForm:
     TcGlobals -> ValReprInfo -> TType -> range -> Typars * CurriedArgInfos * TType * ArgReprInfo
 
+val GetValReprTypeInFSharpFormSmart:
+    TcGlobals -> ValReprInfo -> TType -> range -> Typars -> Typars * CurriedArgInfos * TType * ArgReprInfo
+
 val IsCompiledAsStaticProperty: TcGlobals -> Val -> bool
 
 val IsCompiledAsStaticPropertyWithField: TcGlobals -> Val -> bool
 
 val GetValReprTypeInCompiledForm:
-    TcGlobals ->
-    ValReprInfo ->
-    int ->
-    TType ->
-    range ->
-        Typars * TraitWitnessInfos * CurriedArgInfos * TType option * ArgReprInfo
+    TcGlobals -> ValReprInfo -> int -> TType -> range -> Typars * TraitWitnessInfos * CurriedArgInfos * TType option * ArgReprInfo
+
+val GetValReprTypeInCompiledFormSmart:
+    TcGlobals -> ValReprInfo -> int -> TType -> range -> Typars -> Typars * TraitWitnessInfos * CurriedArgInfos * TType option * ArgReprInfo
 
 val GetFSharpViewOfReturnType: TcGlobals -> TType option -> TType
 

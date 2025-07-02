@@ -1808,23 +1808,6 @@ let destTopForallTy g (ValReprInfo (ntps, _, _)) ty =
     let tps = NormalizeDeclaredTyparsForEquiRecursiveInference g tps
     tps, tau
 
-let GetValReprTypeInFSharpForm g (ValReprInfo(_, argInfos, retInfo) as valReprInfo) ty m =
-    let tps, tau = destTopForallTy g valReprInfo ty
-    let curriedArgTys, returnTy = GetTopTauTypeInFSharpForm g argInfos tau m
-    tps, curriedArgTys, returnTy, retInfo
-
-let IsCompiledAsStaticProperty g (v: Val) =
-    match v.ValReprInfo with
-    | Some valReprInfoValue ->
-         match GetValReprTypeInFSharpForm g valReprInfoValue v.Type v.Range with 
-         | [], [], _, _ when not v.IsMember -> true
-         | _ -> false
-    | _ -> false
-
-let IsCompiledAsStaticPropertyWithField g (v: Val) = 
-    not v.IsCompiledAsStaticPropertyWithoutField &&
-    IsCompiledAsStaticProperty g v
-
 //-------------------------------------------------------------------------
 // Multi-dimensional array types...
 //-------------------------------------------------------------------------
@@ -1945,7 +1928,6 @@ let metadataOfTy g ty =
         ILTypeMetadata tcref.ILTyconInfo
     else 
         FSharpOrArrayOrByrefOrTupleOrExnTypeMetadata 
-
 
 let isILReferenceTy g ty = 
     match metadataOfTy g ty with 
@@ -2585,6 +2567,39 @@ let valOfBind (b: Binding) = b.Var
 
 let valsOfBinds (binds: Bindings) = binds |> List.map (fun b -> b.Var)
 
+let tryDestForallTySmart g ty ambient =
+    if isForallTy g ty then destForallTy g ty else ambient, ty
+
+let destTopForallTySmart g (ValReprInfo (ntps, _, _)) ty ambient =
+    let tps, tau = (if isNil ntps then [], ty else tryDestForallTySmart g ty ambient)
+    // tps may be have been equated to other tps in equi-recursive type inference. Normalize them here 
+    let tps = NormalizeDeclaredTyparsForEquiRecursiveInference g tps
+    tps, tau
+
+let GetValReprTypeInFSharpForm (g: TcGlobals) (ValReprInfo(_, argInfos, retInfo) as valReprInfo) ty m =
+    let tps, tau = destTopForallTy g valReprInfo ty
+
+    let curriedArgTys, returnTy = GetTopTauTypeInFSharpForm g argInfos tau m
+    tps, curriedArgTys, returnTy, retInfo
+
+let GetValReprTypeInFSharpFormSmart (g: TcGlobals) (ValReprInfo(_, argInfos, retInfo) as valReprInfo) ty m ambient =
+    let tps, tau = destTopForallTySmart g valReprInfo ty ambient
+
+    let curriedArgTys, returnTy = GetTopTauTypeInFSharpForm g argInfos tau m
+    tps, curriedArgTys, returnTy, retInfo
+
+let IsCompiledAsStaticProperty g (v: Val) =
+    match v.ValReprInfo with
+    | Some valReprInfoValue ->
+         match GetValReprTypeInFSharpForm g valReprInfoValue v.Type v.Range with 
+         | [], [], _, _ when not v.IsMember -> true
+         | _ -> false
+    | _ -> false
+
+let IsCompiledAsStaticPropertyWithField g (v: Val) = 
+    not v.IsCompiledAsStaticPropertyWithoutField &&
+    IsCompiledAsStaticProperty g v
+
 //--------------------------------------------------------------------------
 // Values representing member functions on F# types
 //--------------------------------------------------------------------------
@@ -2770,7 +2785,27 @@ let GetValReprTypeInCompiledForm g valReprInfo numEnclosingTypars ty m =
             paramArgInfos
     let retTy = if isUnitTy g retTy then None else Some retTy
     (tps, witnessInfos, paramArgInfos, retTy, retInfo)
-     
+
+let GetValReprTypeInCompiledFormSmart g valReprInfo numEnclosingTypars ty m ambient =
+    let tps, paramArgInfos, retTy, retInfo = GetValReprTypeInFSharpFormSmart g valReprInfo ty m ambient
+    let witnessInfos = GetTraitWitnessInfosOfTypars g numEnclosingTypars tps
+    // Eliminate lone single unit arguments
+    let paramArgInfos = 
+        match paramArgInfos, valReprInfo.ArgInfos with 
+        // static member and module value unit argument elimination
+        | [[(_argType, _)]], [[]] -> 
+            //assert isUnitTy g argType 
+            [[]]
+        // instance member unit argument elimination
+        | [objInfo;[(_argType, _)]], [[_objArg];[]] -> 
+            //assert isUnitTy g argType 
+            [objInfo; []]
+        | _ -> 
+            paramArgInfos
+    let retTy = if isUnitTy g retTy then None else Some retTy
+    (tps, witnessInfos, paramArgInfos, retTy, retInfo)
+
+
 // Pull apart the type for an F# value that represents an object model method
 // and see the "member" form for the type, i.e. 
 // detect methods with no arguments by (effectively) looking for single argument type of 'unit'. 
@@ -11953,3 +11988,4 @@ let isTyparOrderMismatch (tps: Typars) (argInfos: CurriedArgInfos) =
 
     typarNamesInArguments.Length = typarNamesInDefinition.Length
     && typarNamesInArguments <> typarNamesInDefinition
+
