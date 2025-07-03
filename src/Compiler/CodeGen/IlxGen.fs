@@ -143,6 +143,14 @@ let rec IsILTypeByref inp =
     | ILType.Modified(_, _, nestedTy) -> IsILTypeByref nestedTy
     | _ -> false
 
+let ilTypesOfParentRefTypars (parentRef: ParentRef) : ILType list =
+    match parentRef with
+    | Parent tcref ->
+        tcref.Deref.TyparsNoRange
+        |> DropErasedTypars
+        |> List.mapi (fun idx _ -> ILType.TypeVar (uint16 idx))
+    | _ -> []
+
 let mainMethName = CompilerGeneratedName "main"
 
 /// Used to query custom attributes when emitting COM interop code.
@@ -493,8 +501,19 @@ let TypeRefForCompLoc cloc =
         NestedTypeRefForCompLoc { cloc with Enclosing = encl } n
 
 /// Compute an ILType for a CompilationLocation for a non-generic type
-let mkILTyForCompLoc cloc =
+/// @@@@@@@@@@@@@@@ Consider whether this can be unified with mkILTyForCompLoc
+let mkILNonGenericTyForCompLoc cloc =
     mkILNonGenericBoxedTy (TypeRefForCompLoc cloc)
+
+/// Compute an ILType for a CompilationLocation for a non-generic type
+let mkILTyForCompLoc cloc isValueType tinst =
+    let tref = TypeRefForCompLoc cloc
+
+    if isValueType then
+        mkILValueTy tref tinst
+    else
+        mkILBoxedTy tref tinst
+
 
 /// Compute visibility for type members
 /// based on hidden and accessibility from the source code
@@ -886,7 +905,7 @@ let GenFieldSpecForStaticField (isInteractive, (g: TcGlobals), ilContainerTy, vs
             assert (g.CompilerGlobalState |> Option.isSome)
             g.CompilerGlobalState.Value.IlxGenNiceNameGenerator.FreshCompilerGeneratedName(nm, m)
 
-        let ilFieldContainerTy = mkILTyForCompLoc (CompLocForInitClass cloc)
+        let ilFieldContainerTy = mkILNonGenericTyForCompLoc (CompLocForInitClass cloc)
         mkILFieldSpecInTy (ilFieldContainerTy, fieldName, ilTy)
 
 let GenRecdFieldRef m cenv (tyenv: TypeReprEnv) (rfref: RecdFieldRef) tyargs =
@@ -1535,7 +1554,7 @@ let ComputeStorageForFSharpValue cenv cloc optIntraAssemblyInfo optShadowLocal i
     let ilTy =
         GenType cenv m TypeReprEnv.Empty returnTy (* TypeReprEnv.Empty ok: not a field in a generic class *)
 
-    let ilTyForProperty = mkILTyForCompLoc cloc
+    let ilTyForProperty = mkILNonGenericTyForCompLoc cloc
     let attribs = vspec.Attribs
 
     let hasLiteralAttr =
@@ -1562,20 +1581,25 @@ let ComputeStorageForFSharpMember cenv valReprInfo memberInfo (vref: ValRef) m =
 
     Method(valReprInfo, vref, mspec, mspecW, m, ctps, mtps, curriedArgInfos, paramInfos, witnessInfos, methodArgTys, retInfo)
 
+let typarsToILTypes cenv tyenv typars : ILType list =
+    typars
+    |> List.map mkTyparTy
+    |> List.map (GenType cenv Range.range0 tyenv)
+
 /// Compute the representation information for an F#-declared function in a module or an F#-declared extension member.
 /// Note, there is considerable overlap with ComputeStorageForFSharpMember/GetMethodSpecForMemberVal and these could be
 /// rationalized.
 let ComputeStorageForFSharpFunctionOrFSharpExtensionMember (cenv: cenv) cloc valReprInfo (vref: ValRef) m (eenv: IlxGenEnv) =
 
-//    do if vref.DisplayName.Equals("``iter@272``") || vref.DisplayName.Equals("``Finish``") || vref.DisplayName.Equals("``takeOuter@308``") || vref.DisplayName.Equals("``takeInner@301``") then
-//        System.Diagnostics.Debugger.Break()
+    do if vref.DisplayName.Equals("``iter@272``") || vref.DisplayName.Equals("``Finish``") || vref.DisplayName.Equals("``takeOuter@308``") || vref.DisplayName.Equals("``takeInner@301``") then
+        System.Diagnostics.Debugger.Break()
 
     let g = cenv.g
     let nm = vref.CompiledName g.CompilerGlobalState
     let numEnclosingTypars =
         if vref.DisplayName.Equals("``iter@272``") then
             System.Diagnostics.Debugger.Break()
-            2
+            0
         elif vref.DisplayName.Equals("``takeOuter@308``") || vref.DisplayName.Equals("``takeInner@301``") then
             2
         else
@@ -1591,7 +1615,7 @@ let ComputeStorageForFSharpFunctionOrFSharpExtensionMember (cenv: cenv) cloc val
     let methodArgTys, paramInfos = curriedArgInfos |> List.concat |> List.unzip
     let ilMethodArgTys = GenParamTypes cenv m tyenvUnderTypars false methodArgTys
     let ilRetTy = GenReturnType cenv m tyenvUnderTypars returnTy
-    let ilLocTy = mkILTyForCompLoc cloc
+    let ilLocTy = mkILTyForCompLoc cloc (isStructTy g vref.Type) (typarsToILTypes cenv (eenv.tyenv) (eenv.tyenv.AsTypars()))
     let ilMethodInst = GenTypeArgs cenv m tyenvUnderTypars (List.map mkTyparTy tps)
 
     let mspec =
@@ -1667,7 +1691,7 @@ let ComputeStorageForValWithValReprInfo
             let nm = "get_" + nm
             let tyenvUnderTypars = TypeReprEnv.Empty.ForTypars []
             let ilRetTy = GenType cenv m tyenvUnderTypars vref.Type
-            let ty = mkILTyForCompLoc cloc
+            let ty = mkILNonGenericTyForCompLoc cloc
             let mspec = mkILStaticMethSpecInTy (ty, nm, [], ilRetTy, [])
 
             StaticProperty(mspec, optShadowLocal)
@@ -2801,7 +2825,7 @@ let GenConstArray cenv (cgbuf: CodeGenBuffer) eenv ilElementType (data: 'a[]) (w
         let ilFieldDef =
             ilFieldDef.With(customAttrs = mkILCustomAttrs [ g.DebuggerBrowsableNeverAttribute ])
 
-        let fspec = mkILFieldSpecInTy (mkILTyForCompLoc eenv.cloc, ilFieldName, fty)
+        let fspec = mkILFieldSpecInTy (mkILNonGenericTyForCompLoc eenv.cloc, ilFieldName, fty)
         CountStaticFieldDef()
         cgbuf.mgbuf.AddFieldDef(fspec.DeclaringTypeRef, ilFieldDef)
 
@@ -4384,9 +4408,11 @@ and GenApp (cenv: cenv) cgbuf eenv (f, fty, tyargs, curriedArgs, m) sequel =
                 if ilTyArgs.Length < numEnclILTypeArgs then
                     error (InternalError("length mismatch", m))
 
-                match g.realsig, vref.ApparentEnclosingEntity with
-                | true, Parent _parent when not (vref.IsMemberOrModuleBinding) && vref.IsCompiledAsTopLevel ->
-                    let envTypeArgs = GenTypeArgs cenv m eenv.tyenv (eenv.tyenv.AsTypars() |> List.map mkTyparTy)
+                match g.realsig with
+                | true when not (vref.IsMemberOrModuleBinding) && vref.IsCompiledAsTopLevel ->
+                    let envTypeArgs = ilTypesOfParentRefTypars vref.ApparentEnclosingEntity
+                    
+                    //GenTypeArgs cenv m eenv.tyenv (eenv.tyenv.AsTypars() |> List.map mkTyparTy)
                     //@@@@@                    let ilTyArgs = stripPrefix envTypeArgs ilTyArgs (fun (a, b) -> a = b)
                     envTypeArgs, ilTyArgs
                 | _ -> List.splitAt numEnclILTypeArgs ilTyArgs
@@ -10469,7 +10495,7 @@ and GenImplFile cenv (mgbuf: AssemblyBuilder) mainInfoOpt eenv (implFile: Checke
     let isFinalFile = Option.isSome mainInfoOpt
 
     let initClassCompLoc = CompLocForInitClass eenv.cloc
-    let initClassTy = mkILTyForCompLoc initClassCompLoc
+    let initClassTy = mkILNonGenericTyForCompLoc initClassCompLoc
     let initClassTrigger = ILTypeInit.OnAny
 
     let initClassFieldSpec =
