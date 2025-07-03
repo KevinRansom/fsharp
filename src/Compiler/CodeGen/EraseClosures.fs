@@ -207,10 +207,12 @@ let mkCallBlockForMultiValueApp cenv doTailCall (argTys, retTy) =
     let callvirt, mr = mkMethSpecForMultiApp cenv (argTys, retTy)
 
     [
-        (if callvirt then
-             if mr.ToString().Contains("iter@272") then System.Diagnostics.Debugger.Break(); I_callvirt(doTailCall, mr, None)
+        if callvirt then
+             if (string (mr.ToString())).Contains("iter@272") then System.Diagnostics.Debugger.Break() else ()
+             I_callvirt(doTailCall, mr, None)
          else
-             if mr.ToString().Contains("iter@272") then System.Diagnostics.Debugger.Break(); I_call(doTailCall, mr, None))
+             if (string (mr.ToString())).Contains("iter@272") then System.Diagnostics.Debugger.Break() else ()
+             I_call(doTailCall, mr, None)
     ]
 
 // --------------------------------------------------------------------
@@ -340,10 +342,14 @@ let mkCallFunc cenv allocLocal numThisGenParams tailness apps =
 let convReturnInstr ty instr =
     match instr with
     | I_ret -> [ I_box ty; I_ret ]
-    | I_call(_, mspec, varargs) -> if mspec.ToString().Contains("iter@272") then System.Diagnostics.Debugger.Break(); [ I_call(Normalcall, mspec, varargs) ]
+    | I_call(_, mspec, varargs) ->
+        if (string (mspec.ToString())).Contains("iter@272") then System.Diagnostics.Debugger.Break() else ()
+        [ I_call(Normalcall, mspec, varargs) ]
     | I_callvirt(_, mspec, varargs) -> [ I_callvirt(Normalcall, mspec, varargs) ]
     | I_callconstraint(callvirt, _, ty, mspec, varargs) -> [ I_callconstraint(callvirt, Normalcall, ty, mspec, varargs) ]
-    | I_calli(_, csig, varargs) -> if mspec.ToString().Contains("iter@272") then System.Diagnostics.Debugger.Break(); [ I_calli(Normalcall, csig, varargs) ]
+    | I_calli(_, csig, varargs) ->
+        if (string (csig.ToString())).Contains("iter@272") then System.Diagnostics.Debugger.Break() else ()
+        [ I_calli(Normalcall, csig, varargs) ]
     | _ -> [ instr ]
 
 let convILMethodBody (thisClo, boxReturnTy) (il: ILMethodBody) =

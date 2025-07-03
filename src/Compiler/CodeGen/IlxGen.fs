@@ -2889,7 +2889,7 @@ let CodeGenThen (cenv: cenv) mgbuf (entryPointInfo, methodName, eenv, alreadyUse
 
 let CodeGenMethod cenv mgbuf (entryPointInfo, methodName, eenv, alreadyUsedArgs, selfArgOpt, codeGenFunction, m) =
 
-    do if methodName.ToString().Contains("iter@272") then System.Diagnostics.Debugger.Break()
+    do if (string (methodName.ToString())).Contains("iter@272") then System.Diagnostics.Debugger.Break()
 
     let locals, maxStack, lab2pc, instrs, exns, localDebugSpecs, hasDebugPoints =
         CodeGenThen cenv mgbuf (entryPointInfo, methodName, eenv, alreadyUsedArgs, selfArgOpt, codeGenFunction, m)
@@ -5512,9 +5512,11 @@ and GenILCall
                 I_callconstraint(useICallVirt, tail, ilObjArgTy, ilMethSpec, None)
             | None ->
                 if useICallVirt then
-                    if ilMethSpec.ToString().Contains("iter@272") then System.Diagnostics.Debugger.Break(); I_callvirt(tail, ilMethSpec, None)
+                    if (string (ilMethSpec.ToString())).Contains("iter@272") then System.Diagnostics.Debugger.Break() else ()
+                    I_callvirt(tail, ilMethSpec, None)
                 else
-                    if ilMethSpec.ToString().Contains("iter@272") then System.Diagnostics.Debugger.Break(); I_call(tail, ilMethSpec, None)
+                    if (string (ilMethSpec.ToString())).Contains("iter@272") then System.Diagnostics.Debugger.Break() else ()
+                    I_call(tail, ilMethSpec, None)
 
     CG.EmitInstr cgbuf (pop (argExprs.Length + (if isSuperInit then 1 else 0))) (if isSuperInit then Push0 else Push ilReturnTys) il
 
