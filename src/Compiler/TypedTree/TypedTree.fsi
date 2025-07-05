@@ -3514,6 +3514,10 @@ type ValReprInfo =
     /// Get the total number of arguments
     member TotalArgCount: int
 
+    /// Replace the typars for this ValReprInfo
+    member WithTypars: (TyparReprInfo list) -> ValReprInfo
+
+
 /// Records the "extra information" for an argument compiled as a real
 /// method argument, specifically the argument name type attributes.
 [<NoEquality; NoComparison; RequireQualifiedAccess; StructuredFormatDisplay("{DebugText}")>]

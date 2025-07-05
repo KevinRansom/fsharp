@@ -136,12 +136,20 @@ let rec IsILTypeByref inp =
     | ILType.Modified(_, _, nestedTy) -> IsILTypeByref nestedTy
     | _ -> false
 
-let ilTypesOfParentRefTypars (parentRef: ParentRef) : ILType list =
+let typarLengthFromParentRefTypars parentRef =
     match parentRef with
     | Parent tcref ->
         tcref.Deref.TyparsNoRange
         |> DropErasedTypars
-        |> List.mapi (fun idx _ -> ILType.TypeVar (uint16 idx))
+        |> List.length
+    | _ -> 0
+
+let typinstFromParentRefTypars parentRef =
+    match parentRef with
+    | Parent tcref ->
+        tcref.Deref.TyparsNoRange
+        |> DropErasedTypars
+        |> List.map mkTyparTy
     | _ -> []
 
 let mainMethName = CompilerGeneratedName "main"
@@ -592,11 +600,12 @@ type TypeReprEnv
     member eenv.ForTyconRef(tcref: TyconRef) = eenv.ForTycon tcref.Deref
 
     /// Get a list of the Typars in this environment
-    member eenv.AsTypars() =
+    member eenv.AsTypars(?isCompilerGenerated: bool) =
+        let isCompilerGenerated = defaultArg isCompilerGenerated false
         reprs
         |> Map.toList
         |> List.map (fun (_, (_, tp)) -> tp)
-        |> List.filter (fun tp -> not tp.IsCompilerGenerated)
+        |> List.filter (fun tp -> tp.IsCompilerGenerated = isCompilerGenerated)
 
 //--------------------------------------------------------------------------
 // Generate type references
@@ -1582,12 +1591,16 @@ let ComputeStorageForFSharpMember cenv valReprInfo memberInfo (vref: ValRef) m =
 let ComputeStorageForFSharpFunctionOrFSharpExtensionMember (cenv: cenv) cloc valReprInfo (vref: ValRef) m (eenv: IlxGenEnv) =
     let g = cenv.g
     let nm = vref.CompiledName g.CompilerGlobalState
-    let numEnclosingTypars = CountEnclosingTyparsOfActualParentOfVal vref.Deref
+    let _numEnclosingTypars = CountEnclosingTyparsOfActualParentOfVal vref.Deref
+    let numEnclosingTypars = typarLengthFromParentRefTypars vref.Deref.ApparentEnclosingEntity
+
+    if _numEnclosingTypars <> numEnclosingTypars then
+        error (InternalError("CodeGen check: type checking did not ensure that this method is sufficiently generic", vref.Range))
 
     let tps, witnessInfos, curriedArgInfos, returnTy, retInfo =
         GetValReprTypeInCompiledForm g valReprInfo numEnclosingTypars vref.Type m
 
-    let tyenvUnderTypars = TypeReprEnv.Empty.ForTypars tps      //@@@@@@@@@@@@@@@@@@@@@
+    let tyenvUnderTypars = TypeReprEnv.Empty.ForTypars tps
     let methodArgTys, paramInfos = curriedArgInfos |> List.concat |> List.unzip
     let ilMethodArgTys = GenParamTypes cenv m tyenvUnderTypars false methodArgTys
     let ilRetTy = GenReturnType cenv m tyenvUnderTypars returnTy
@@ -1646,13 +1659,50 @@ let ComputeStorageForValWithValReprInfo
                         vref.Range
                     )
                 )
+            //| Some vr ->
+            //    match cenv.g.realsig, vref.ApparentEnclosingEntity with
+            //    | true, Parent _parent when not (vref.IsMemberOrModuleBinding) && vref.IsCompiledAsTopLevel ->
+            //        let envTypeArs = eenv.tyenv.AsTypars() |> List.map(fun typar -> TyparReprInfo(typar.Id, typar.Kind))
+            //        vr.WithTypars envTypeArs
+            //    | _ -> vr
             | Some vr ->
-                match cenv.g.realsig, vref.ApparentEnclosingEntity with
-                | true, Parent _parent when not (vref.IsMemberOrModuleBinding) && vref.IsCompiledAsTopLevel ->
-                    let envTypeArs = eenv.tyenv.AsTypars() |> List.map(fun typar -> TyparReprInfo(typar.Id, typar.Kind))
-                    let (ValReprInfo(_typars, args, result)) = vr
-                    ValReprInfo(envTypeArs, args, result)
+                match cenv.g.realsig with
+                | true when not (vref.IsMemberOrModuleBinding) && vref.IsCompiledAsTopLevel ->
+//                    let numEnclILTypeArgs =  typarLengthFromParentRefTypars vref.ApparentEnclosingEntity
+//                    let typinst = (typinstFromParentRefTypars vref.ApparentEnclosingEntity |> List.take numEnclILTypeArgs)
+                    let ilMethodArgs =
+                        let methodTypars = eenv.tyenv.AsTypars(true)
+//                        let typars = tps |> List.skip numEnclILTypeArgs
+                        let methodArgs = methodTypars |> List.mapi (fun idx typar -> TyparReprInfo((Ident($"!{idx}", m), typar.Kind)))
+                        methodArgs
+                    vr.WithTypars ilMethodArgs
                 | _ -> vr
+
+/////@@@@@@@@@@@@@@@@
+            //let ilEnclArgTys, ilMethArgTys =
+            //    match g.realsig with
+            //    | true when (not vref.IsMemberOrModuleBinding) && vref.IsCompiledAsTopLevel ->
+            //        let numEnclILTypeArgs =  typarLengthFromParentRefTypars vref.ApparentEnclosingEntity
+            //        let typinst = (typinstFromParentRefTypars vref.ApparentEnclosingEntity |> List.take numEnclILTypeArgs)
+            //        let ilTypeArgs = (typinst |> List.mapi (fun idx _ -> ILType.TypeVar (uint16 idx)))
+            //        let ilMethArgs = (tyargs |> List.skip numEnclILTypeArgs |> List.map (fun ty -> GenParamType cenv m eenv.tyenv false ty) |> List.mapi (fun idx _ -> ILType.TypeVar (uint16 idx)))
+            //        ilTypeArgs, ilMethArgs
+
+            //    | _ ->
+            //        let numEnclILTypeArgs =
+            //            match vref.MemberInfo with
+            //            | Some _ when not vref.IsExtensionMember -> List.length (vref.MemberApparentEntity.TyparsNoRange |> DropErasedTypars)
+            //            | _ -> 0
+
+            //        let ilTyArgs = GenTypeArgs cenv m eenv.tyenv tyargs
+            //        List.splitAt numEnclILTypeArgs ilTyArgs
+////@@@@@@@@@@@@@@@
+
+
+
+
+
+
 
         if vref.Deref.IsCompiledAsStaticPropertyWithoutField then
             let nm = "get_" + nm
@@ -2880,6 +2930,8 @@ let CodeGenThen (cenv: cenv) mgbuf (entryPointInfo, methodName, eenv, alreadyUse
 
 let CodeGenMethod cenv mgbuf (entryPointInfo, methodName, eenv, alreadyUsedArgs, selfArgOpt, codeGenFunction, m) =
 
+    do if (string (methodName.ToString())).Contains("takeInner") then System.Diagnostics.Debugger.Break()
+    do if (string (methodName.ToString())).Contains("takeOuter") then System.Diagnostics.Debugger.Break()
     do if (string (methodName.ToString())).Contains("iter@272") then System.Diagnostics.Debugger.Break()
 
     let locals, maxStack, lab2pc, instrs, exns, localDebugSpecs, hasDebugPoints =
@@ -4336,11 +4388,12 @@ and GenApp (cenv: cenv) cgbuf eenv (f, fty, tyargs, curriedArgs, m) sequel =
         ->
 
         let storage = StorageForValRef m vref eenv
+        if vref.DisplayName.Contains("Lookup@28") then System.Diagnostics.Debugger.Break()
+        if vref.DisplayName.Contains("takeInner") then System.Diagnostics.Debugger.Break()
+        if vref.DisplayName.Contains("takeOuter") then System.Diagnostics.Debugger.Break()
 
         match storage with
         | Method(valReprInfo, vref, mspec, mspecW, _, ctps, mtps, curriedArgInfos, _, _, _, _) ->
-
-            //if vref.DisplayName.Contains("iter@272") then System.Diagnostics.Debugger.Break()
 
             let nowArgs, laterArgs = List.splitAt curriedArgInfos.Length curriedArgs
 
@@ -4357,8 +4410,6 @@ and GenApp (cenv: cenv) cgbuf eenv (f, fty, tyargs, curriedArgs, m) sequel =
                 else
                     mspecW
 
-            let ilTyArgs = GenTypeArgs cenv m eenv.tyenv tyargs
-
             // For instance method calls chop off some type arguments, which are already
             // carried by the class.  Also work out if it's a virtual call.
             let _, virtualCall, newobj, isSuperInit, isSelfInit, takesInstanceArg, _, _ =
@@ -4366,23 +4417,23 @@ and GenApp (cenv: cenv) cgbuf eenv (f, fty, tyargs, curriedArgs, m) sequel =
 
             // numEnclILTypeArgs will include unit-of-measure args, unfortunately. For now, just cut-and-paste code from GetMemberCallInfo
             // @REVIEW: refactor this
-            let numEnclILTypeArgs =
-                match vref.MemberInfo with
-                | Some _ when not vref.IsExtensionMember -> List.length (vref.MemberApparentEntity.TyparsNoRange |> DropErasedTypars)
-                | _ -> 0
-
             let ilEnclArgTys, ilMethArgTys =
-                if ilTyArgs.Length < numEnclILTypeArgs then
-                    error (InternalError("length mismatch", m))
-
                 match g.realsig with
-                | true when not (vref.IsMemberOrModuleBinding) && vref.IsCompiledAsTopLevel ->
-                    let envTypeArgs = ilTypesOfParentRefTypars vref.ApparentEnclosingEntity
-                    
-                    //GenTypeArgs cenv m eenv.tyenv (eenv.tyenv.AsTypars() |> List.map mkTyparTy)
-                    //@@@@@                    let ilTyArgs = stripPrefix envTypeArgs ilTyArgs (fun (a, b) -> a = b)
-                    envTypeArgs, ilTyArgs
-                | _ -> List.splitAt numEnclILTypeArgs ilTyArgs
+                | true when (not vref.IsMemberOrModuleBinding) && vref.IsCompiledAsTopLevel ->
+                    let numEnclILTypeArgs =  typarLengthFromParentRefTypars vref.ApparentEnclosingEntity
+                    let typinst = (typinstFromParentRefTypars vref.ApparentEnclosingEntity |> List.take numEnclILTypeArgs)
+                    let ilTypeArgs = (typinst |> List.mapi (fun idx _ -> ILType.TypeVar (uint16 idx)))
+                    let ilMethArgs = (tyargs |> List.skip numEnclILTypeArgs |> List.map (fun ty -> GenParamType cenv m eenv.tyenv false ty) |> List.mapi (fun idx _ -> ILType.TypeVar (uint16 idx)))
+                    ilTypeArgs, ilMethArgs
+
+                | _ ->
+                    let numEnclILTypeArgs =
+                        match vref.MemberInfo with
+                        | Some _ when not vref.IsExtensionMember -> List.length (vref.MemberApparentEntity.TyparsNoRange |> DropErasedTypars)
+                        | _ -> 0
+
+                    let ilTyArgs = GenTypeArgs cenv m eenv.tyenv tyargs
+                    List.splitAt numEnclILTypeArgs ilTyArgs
 
             let boxity = mspec.DeclaringType.Boxity
             let mspec = mkILMethSpec (mspec.MethodRef, boxity, ilEnclArgTys, ilMethArgTys)
@@ -9341,7 +9392,7 @@ and GenMethodForBinding
                 | _ -> None
 
             let ilLazyCode =
-                if (*v.DisplayName.Equals("Finish") ||*) v.DisplayName.Equals("``iter@272``") then System.Diagnostics.Debugger.Break()
+                //if (*v.DisplayName.Equals("Finish") ||*) v.DisplayName.Equals("``iter@272``") then System.Diagnostics.Debugger.Break()
                 DelayCodeGenMethodForExpr cenv mgbuf (tailCallInfo, mspec.Name, eenvForMeth, 0, selfValOpt, bodyExpr, sequel)
 
             // This is the main code generation for most methods

@@ -4943,6 +4943,9 @@ type ValReprInfo =
     [<DebuggerBrowsable(DebuggerBrowsableState.Never)>]
     member x.DebugText = x.ToString()
 
+    /// Replace the typars for this ValReprInfo
+    member x.WithTypars typars = let (ValReprInfo(_, args, result)) = x in  ValReprInfo(typars, args, result)
+
     override _.ToString() = "ValReprInfo(...)"
 
 /// Records the "extra information" for an argument compiled as a real
