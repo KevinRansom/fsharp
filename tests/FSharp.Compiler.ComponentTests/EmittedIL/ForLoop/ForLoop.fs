@@ -6,14 +6,33 @@ open FSharp.Test.Compiler
 
 module ForLoop =
 
+    //let verifyCompilation compilation =
+    //    compilation
+    //    |> withOptions [ "--test:EmitFeeFeeAs100001" ]
+    //    |> asExe
+    //    |> withEmbeddedPdb
+    //    |> withEmbedAllSource
+    //    |> ignoreWarnings
+    //    |> verifyILBaseline
+
+    //    //|> verifyPEFileWithSystemDlls
+    //    //|> withOutputContainsAllInOrderWithWildcards [
+    //    //    "All Classes and Methods in*ForLoopTestCase.exe Verified."
+    //    //    ]
     let verifyCompilation compilation =
         compilation
+        //|> withName "ForLoopTestCase"
         |> withOptions [ "--test:EmitFeeFeeAs100001" ]
         |> asExe
         |> withEmbeddedPdb
         |> withEmbedAllSource
         |> ignoreWarnings
-        |> verifyILBaseline
+        |> compile
+        |> verifyILBaselineResult
+        |> verifyPEFileWithSystemDlls
+        |> withOutputContainsAllInOrderWithWildcards [
+            "All Classes and Methods in*.exe Verified."
+            ]
 
     // SOURCE=ForLoop01.fs                 SCFLAGS="-g --test:EmitFeeFeeAs100001 --optimize-" COMPILE_ONLY=1 POSTCMD="..\\CompareIL.cmd ForLoop01.exe"	# ForLoop01.fs -
     [<Theory; FileInlineData("ForLoop01.fs", Realsig=BooleanOptions.Both, Optimize=BooleanOptions.False)>]
