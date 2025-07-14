@@ -575,12 +575,11 @@ type TypeReprEnv
     member eenv.ForTyconRef(tcref: TyconRef) = eenv.ForTycon tcref.Deref
 
     /// Get a list of the Typars in this environment
-    member eenv.AsUserProvidedTypars() =
+    member eenv.AsTypars() =
         reprs
         |> Map.toList
         |> List.map (fun (_, (_, tp)) -> tp)
         |> List.filter (fun tp -> not tp.IsCompilerGenerated)
-        |> Zset.ofList typarOrder
 
 //--------------------------------------------------------------------------
 // Generate type references
@@ -1566,12 +1565,19 @@ let ComputeStorageForFSharpFunctionOrFSharpExtensionMember (cenv: cenv) cloc val
     let tps, witnessInfos, curriedArgInfos, returnTy, retInfo =
         GetValReprTypeInCompiledForm g valReprInfo numEnclosingTypars vref.Type m
 
+    let tpsForMethodInst =
+        match vref.MemberInfo, vref.ApparentEnclosingEntity with
+        | _, Parent parent when g.realsig && (not vref.IsMemberOrModuleBinding && vref.IsCompiledAsTopLevel) ->
+            tps |> List.skip (parent.TyparsNoRange |> DropErasedTypars).Length
+        | _ ->
+            tps
+
     let tyenvUnderTypars = TypeReprEnv.Empty.ForTypars tps
     let methodArgTys, paramInfos = curriedArgInfos |> List.concat |> List.unzip
     let ilMethodArgTys = GenParamTypes cenv m tyenvUnderTypars false methodArgTys
     let ilRetTy = GenReturnType cenv m tyenvUnderTypars returnTy
     let ilLocTy = mkILTyForCompLoc cloc
-    let ilMethodInst = GenTypeArgs cenv m tyenvUnderTypars (List.map mkTyparTy tps)
+    let ilMethodInst = GenTypeArgs cenv m tyenvUnderTypars (List.map mkTyparTy tpsForMethodInst) 
 
     let mspec =
         mkILStaticMethSpecInTy (ilLocTy, nm, ilMethodArgTys, ilRetTy, ilMethodInst)
@@ -1585,7 +1591,7 @@ let ComputeStorageForFSharpFunctionOrFSharpExtensionMember (cenv: cenv) cloc val
 
             mkILStaticMethSpecInTy (ilLocTy, ExtraWitnessMethodName nm, (ilWitnessArgTys @ ilMethodArgTys), ilRetTy, ilMethodInst)
 
-    Method(valReprInfo, vref, mspec, mspecW, m, [], tps, curriedArgInfos, paramInfos, witnessInfos, methodArgTys, retInfo)
+    Method(valReprInfo, vref, mspec, mspecW, m, [], tpsForMethodInst, curriedArgInfos, paramInfos, witnessInfos, methodArgTys, retInfo)
 
 /// Determine if an F#-declared value, method or function is compiled as a method.
 let IsFSharpValCompiledAsMethod g (v: Val) =
@@ -1604,8 +1610,14 @@ let IsFSharpValCompiledAsMethod g (v: Val) =
 /// method (possibly and instance method). Otherwise it gets represented as a
 /// static field and property.
 let ComputeStorageForValWithValReprInfo
-    (cenv, optIntraAssemblyInfo: IlxGenIntraAssemblyInfo option, isInteractive, optShadowLocal, vref: ValRef, cloc)
-    =
+    (
+        cenv,
+        optIntraAssemblyInfo: IlxGenIntraAssemblyInfo option,
+        isInteractive,
+        optShadowLocal,
+        vref: ValRef,
+        cloc
+    ) =
 
     if
         isUnitTy cenv.g vref.Type
@@ -1614,6 +1626,8 @@ let ComputeStorageForValWithValReprInfo
     then
         Null
     else
+        let m = vref.Range
+        let nm = vref.CompiledName cenv.g.CompilerGlobalState
         let valReprInfo =
             match vref.ValReprInfo with
             | None ->
@@ -1624,10 +1638,7 @@ let ComputeStorageForValWithValReprInfo
                         vref.Range
                     )
                 )
-            | Some a -> a
-
-        let m = vref.Range
-        let nm = vref.CompiledName cenv.g.CompilerGlobalState
+            | Some vr -> vr
 
         if vref.Deref.IsCompiledAsStaticPropertyWithoutField then
             let nm = "get_" + nm
@@ -1665,7 +1676,7 @@ let ComputeStorageForNonLocalVal cenv cloc modref (v: Val) =
     | Some _ -> ComputeStorageForValWithValReprInfo(cenv, None, false, NoShadowLocal, mkNestedValRef modref v, cloc)
 
 /// Determine how all the F#-declared top level values, functions and members are represented, for an external module or namespace.
-let rec AddStorageForNonLocalModuleOrNamespaceRef cenv cloc acc (modref: ModuleOrNamespaceRef) (modul: ModuleOrNamespace) =
+let rec AddStorageForNonLocalModuleOrNamespaceRef cenv cloc acc (modref: ModuleOrNamespaceRef) (modul: ModuleOrNamespace) eenv =
     let acc =
         (acc, modul.ModuleOrNamespaceType.ModuleAndNamespaceDefinitions)
         ||> List.fold (fun acc smodul ->
@@ -1674,7 +1685,8 @@ let rec AddStorageForNonLocalModuleOrNamespaceRef cenv cloc acc (modref: ModuleO
                 (CompLocForSubModuleOrNamespace cloc smodul)
                 acc
                 (modref.NestedTyconRef smodul)
-                smodul)
+                smodul
+                eenv)
 
     let acc =
         (acc, modul.ModuleOrNamespaceType.AllValsAndMembers)
@@ -1695,7 +1707,7 @@ let AddStorageForExternalCcu cenv eenv (ccu: CcuThunk) =
                 (fun smodul acc ->
                     let cloc = CompLocForSubModuleOrNamespace cloc smodul
                     let modref = mkNonLocalCcuRootEntityRef ccu smodul
-                    AddStorageForNonLocalModuleOrNamespaceRef cenv cloc acc modref smodul)
+                    AddStorageForNonLocalModuleOrNamespaceRef cenv cloc acc modref smodul eenv)
                 ccu.RootModulesAndNamespaces
                 eenv
 
@@ -2918,7 +2930,7 @@ let ComputeDebugPointForBinding g bind =
 // Generate expressions
 //-------------------------------------------------------------------------
 
-let rec GenExpr cenv cgbuf eenv (expr: Expr) sequel =
+let rec GenExpr cenv (cgbuf: CodeGenBuffer) eenv (expr: Expr) sequel =
     cenv.stackGuard.Guard
     <| fun () ->
 
@@ -4327,8 +4339,10 @@ and GenApp (cenv: cenv) cgbuf eenv (f, fty, tyargs, curriedArgs, m) sequel =
             // numEnclILTypeArgs will include unit-of-measure args, unfortunately. For now, just cut-and-paste code from GetMemberCallInfo
             // @REVIEW: refactor this
             let numEnclILTypeArgs =
-                match vref.MemberInfo with
-                | Some _ when not vref.IsExtensionMember -> List.length (vref.MemberApparentEntity.TyparsNoRange |> DropErasedTypars)
+                match vref.MemberInfo, vref.ApparentEnclosingEntity with
+                | Some _, _ when not vref.IsExtensionMember -> List.length (vref.MemberApparentEntity.TyparsNoRange |> DropErasedTypars)
+                | _, Parent parent when g.realsig && (not vref.IsMemberOrModuleBinding && vref.IsCompiledAsTopLevel) ->
+                    parent.TyparsNoRange.Length
                 | _ -> 0
 
             let ilEnclArgTys, ilMethArgTys =
@@ -6906,7 +6920,7 @@ and GetIlxClosureFreeVars cenv m (thisVars: ValRef list) boxity eenv takenNames 
         | _ -> newUnique ()
 
     // Choose a name for the closure
-    let ilCloTypeRef, initialFreeTyvars =
+    let ilCloTypeRef =
         let boundvar =
             eenv.letBoundVars |> List.tryFind (fun v -> not v.IsCompilerGenerated)
 
@@ -6925,15 +6939,7 @@ and GetIlxClosureFreeVars cenv m (thisVars: ValRef list) boxity eenv takenNames 
 
         let ilCloTypeRef = NestedTypeRefForCompLoc eenv.cloc cloName
 
-        let initialFreeTyvars =
-            match g.realsig with
-            | true ->
-                { emptyFreeTyvars with
-                    FreeTypars = eenv.tyenv.AsUserProvidedTypars()
-                }
-            | false -> emptyFreeTyvars
-
-        ilCloTypeRef, initialFreeTyvars
+        ilCloTypeRef
 
     // Collect the free variables of the closure
     let cloFreeVarResults =
@@ -6944,12 +6950,7 @@ and GetIlxClosureFreeVars cenv m (thisVars: ValRef list) boxity eenv takenNames 
             | None -> opts
             | Some(tcref, _, typars, _) -> opts.WithTemplateReplacement(tyconRefEq g tcref, typars)
 
-        accFreeInExpr
-            opts
-            expr
-            { emptyFreeVars with
-                FreeTyvars = initialFreeTyvars
-            }
+        accFreeInExpr opts expr emptyFreeVars
 
     // Partition the free variables when some can be accessed from places besides the immediate environment
     // Also filter out the current value being bound, if any, as it is available from the "this"
@@ -8451,7 +8452,6 @@ and GenBindingAfterDebugPoint cenv cgbuf eenv bind isStateVar startMarkOpt =
         GenExpr cenv cgbuf eenv cctorBody discard
 
     | Method(valReprInfo, _, mspec, mspecW, _, ctps, mtps, curriedArgInfos, paramInfos, witnessInfos, argTys, retInfo) when not isStateVar ->
-
         let methLambdaTypars, methLambdaCtorThisValOpt, methLambdaBaseValOpt, methLambdaCurriedVars, methLambdaBody, methLambdaBodyTy =
             IteratedAdjustLambdaToMatchValReprInfo g cenv.amap valReprInfo rhsExpr
 
@@ -9147,27 +9147,26 @@ and GenMethodForBinding
     cenv
     mgbuf
     eenv
-    (
-        v: Val,
-        mspec,
-        hasWitnessEntry,
-        generateWitnessArgs,
-        access,
-        ctps,
-        mtps,
-        witnessInfos,
-        curriedArgInfos,
-        paramInfos,
-        argTys,
-        retInfo,
-        valReprInfo,
-        ctorThisValOpt,
-        baseValOpt,
-        methLambdaTypars,
-        methLambdaVars,
-        methLambdaBody,
-        returnTy
-    ) =
+    (v: Val,
+     mspec,
+     hasWitnessEntry,
+     generateWitnessArgs,
+     access,
+     ctps,
+     mtps,
+     witnessInfos,
+     curriedArgInfos,
+     paramInfos,
+     argTys,
+     retInfo,
+     valReprInfo,
+     ctorThisValOpt,
+     baseValOpt,
+     methLambdaTypars,
+     methLambdaVars,
+     methLambdaBody,
+     returnTy)
+    =
     let g = cenv.g
     let m = v.Range
 
@@ -9194,6 +9193,7 @@ and GenMethodForBinding
 
     // The type parameters of the method's type are different to the type parameters
     // for the big lambda ("tlambda") of the implementation of the method.
+
     let eenvUnderMethLambdaTypars = EnvForTypars methLambdaTypars eenv
     let eenvUnderMethTypeClassTypars = EnvForTypars ctps eenv
     let eenvUnderMethTypeTypars = AddTyparsToEnv mtps eenvUnderMethTypeClassTypars
@@ -9364,7 +9364,14 @@ and GenMethodForBinding
             | _ -> ()
         ]
 
-    let ilTypars = GenGenericParams cenv eenvUnderMethLambdaTypars methLambdaTypars
+    let ilTypars = 
+        let methLambdaTypars =
+            // @@@@@@ Maybe here
+            match v.ApparentEnclosingEntity with
+            | Parent parent when g.realsig && (not v.IsMemberOrModuleBinding && v.IsCompiledAsTopLevel) ->
+                methLambdaTypars |> List.skip (parent.TyparsNoRange |> DropErasedTypars).Length
+            | _ -> methLambdaTypars
+        GenGenericParams cenv eenvUnderMethLambdaTypars methLambdaTypars
 
     let ilParams =
         GenParams cenv eenvUnderMethTypeTypars m mspec witnessInfos paramInfos argTys (Some nonUnitNonSelfMethodVars)
