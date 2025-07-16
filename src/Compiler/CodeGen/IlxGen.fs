@@ -1554,25 +1554,81 @@ let ComputeStorageForFSharpMember cenv valReprInfo memberInfo (vref: ValRef) m =
 
     Method(valReprInfo, vref, mspec, mspecW, m, ctps, mtps, curriedArgInfos, paramInfos, witnessInfos, methodArgTys, retInfo)
 
+/// Extract declared (non-ambient) typars and tau from a type,
+/// independent of ValReprInfo and isForallTy gatekeeping.
+let destRealisticTyparsAndTau g (ty: TType) =
+    // Try structural forall extraction
+    let structuralTps, tau =
+        match tryDestForallTy g ty with
+        | [], _ -> [], ty  // No forall structure, fallback to full type
+        | tps, tau -> NormalizeDeclaredTyparsForEquiRecursiveInference g tps, tau
+    structuralTps, tau
+
+/// Given a type and a list of ambient typars,
+/// rewrap it with a `forall` using only the declared typars.
+/// This forces realism ownership and lets downstream code see declared generics clearly.
+let wrapMethodTyparsIntoForallIfNeeded g (ty: TType) (ambientTypars: Typar list) =
+    // Try extracting any typars that might be present structurally
+    let allTypars, tau = tryDestForallTy g ty
+
+    let normalizedTypars = NormalizeDeclaredTyparsForEquiRecursiveInference g allTypars
+
+    // Compute which typars are not ambient ? these are method-declared
+    let declaredTypars = normalizedTypars|> List.filter (fun tp -> not (ambientTypars |> List.exists (fun ap -> typarRefEq ap tp)))
+
+    mkForallTyIfNeeded declaredTypars tau
+
+let getTpsForMethodInst (g: TcGlobals) (vref: ValRef) =
+    match vref.MemberInfo, vref.ApparentEnclosingEntity with
+    | _, Parent parent when g.realsig && (not vref.IsMemberOrModuleBinding && vref.IsCompiledAsTopLevel) ->
+        let typars = parent.TyparsNoRange |> DropErasedTypars
+        let ty = wrapMethodTyparsIntoForallIfNeeded g vref.Type typars
+        (destRealisticTyparsAndTau g ty) |> fst
+    | _ -> []
+
+/// In scope: cenv, m, eenv, g : TcGlobals
+//let getMethodInstInfo (cenv: cenv) (m: range) (eenv: IlxGenEnv) (g: TcGlobals) (vref: ValRef) =
+//    match vref.MemberInfo, vref.ApparentEnclosingEntity with
+//    // only for realsig+ top-level compiled vals
+//    | _, Parent parent when g.realsig && not vref.IsMemberOrModuleBinding && vref.IsCompiledAsTopLevel ->
+//        let enclosingTypars = parent.TyparsNoRange |> DropErasedTypars
+//        let instTy = wrapMethodTyparsIntoForallIfNeeded g vref.Type enclosingTypars
+//        let methodTypars, _tau = destRealisticTyparsAndTau g instTy
+//        let allTyargs = (enclosingTypars @ methodTypars) |> List.map mkTyparTy
+//        let ilTyArgs = GenTypeArgs cenv m eenv.tyenv allTyargs
+//        let numEnclosingTypars = List.length enclosingTypars
+//
+//        if ilTyArgs.Length < numEnclosingTypars then
+//            error (InternalError("Tyargs split mismatch", m))
+//
+//        let ilEnclArgTys, ilMethArgTys =List.splitAt numEnclosingTypars ilTyArgs
+//
+//        // return the 3 pieces
+//        numEnclosingTypars, ilEnclArgTys, ilMethArgTys
+//
+//    // fallback for non-generic or non-realsig vals
+//    | _ -> 0, [], []
+
 /// Compute the representation information for an F#-declared function in a module or an F#-declared extension member.
 /// Note, there is considerable overlap with ComputeStorageForFSharpMember/GetMethodSpecForMemberVal and these could be
 /// rationalized.
-let ComputeStorageForFSharpFunctionOrFSharpExtensionMember (cenv: cenv) cloc valReprInfo (vref: ValRef) m =
+let ComputeStorageForFSharpFunctionOrFSharpExtensionMember (cenv: cenv) (eenv:IlxGenEnv) cloc valReprInfo (vref: ValRef) m =
     let g = cenv.g
     let nm = vref.CompiledName g.CompilerGlobalState
     let numEnclosingTypars = CountEnclosingTyparsOfActualParentOfVal vref.Deref
-
     let tps, witnessInfos, curriedArgInfos, returnTy, retInfo =
         GetValReprTypeInCompiledForm g valReprInfo numEnclosingTypars vref.Type m
 
-    let tpsForMethodInst =
+    let tpsForMethodInst = getTpsForMethodInst g vref 
+    let tyenvUnderTypars =
+        // With realsig+ the ambient typars are available under MethodInst
+        // With realsig- there are no ambient typars
         match vref.MemberInfo, vref.ApparentEnclosingEntity with
-        | _, Parent parent when g.realsig && (not vref.IsMemberOrModuleBinding && vref.IsCompiledAsTopLevel) ->
-            tps |> List.skip (parent.TyparsNoRange |> DropErasedTypars).Length
+        | _, Parent _ when g.realsig && not vref.IsMemberOrModuleBinding && vref.IsCompiledAsTopLevel ->
+            TypeReprEnv.Empty.ForTypars (eenv.tyenv.AsTypars() @ tpsForMethodInst)
         | _ ->
-            tps
+            TypeReprEnv.Empty.ForTypars tps
 
-    let tyenvUnderTypars = TypeReprEnv.Empty.ForTypars tps
     let methodArgTys, paramInfos = curriedArgInfos |> List.concat |> List.unzip
     let ilMethodArgTys = GenParamTypes cenv m tyenvUnderTypars false methodArgTys
     let ilRetTy = GenReturnType cenv m tyenvUnderTypars returnTy
@@ -1612,6 +1668,7 @@ let IsFSharpValCompiledAsMethod g (v: Val) =
 let ComputeStorageForValWithValReprInfo
     (
         cenv,
+        eenv,
         optIntraAssemblyInfo: IlxGenIntraAssemblyInfo option,
         isInteractive,
         optShadowLocal,
@@ -1660,20 +1717,20 @@ let ComputeStorageForValWithValReprInfo
             | _ ->
                 match vref.MemberInfo with
                 | Some memberInfo when not vref.IsExtensionMember -> ComputeStorageForFSharpMember cenv valReprInfo memberInfo vref m
-                | _ -> ComputeStorageForFSharpFunctionOrFSharpExtensionMember cenv cloc valReprInfo vref m
+                | _ -> ComputeStorageForFSharpFunctionOrFSharpExtensionMember cenv eenv cloc valReprInfo vref m
 
 /// Determine how an F#-declared value, function or member is represented, if it is in the assembly being compiled.
 let ComputeAndAddStorageForLocalValWithValReprInfo (cenv, intraAssemblyFieldTable, isInteractive, optShadowLocal) cloc (v: Val) eenv =
     let storage =
-        ComputeStorageForValWithValReprInfo(cenv, Some intraAssemblyFieldTable, isInteractive, optShadowLocal, mkLocalValRef v, cloc)
+        ComputeStorageForValWithValReprInfo(cenv, eenv, Some intraAssemblyFieldTable, isInteractive, optShadowLocal, mkLocalValRef v, cloc)
 
     AddStorageForVal cenv.g (v, notlazy storage) eenv
 
 /// Determine how an F#-declared value, function or member is represented, if it is an external assembly.
-let ComputeStorageForNonLocalVal cenv cloc modref (v: Val) =
+let ComputeStorageForNonLocalVal cenv eenv cloc modref (v: Val) =
     match v.ValReprInfo with
     | None -> error (InternalError("ComputeStorageForNonLocalVal, expected an ValReprInfo for " + v.LogicalName, v.Range))
-    | Some _ -> ComputeStorageForValWithValReprInfo(cenv, None, false, NoShadowLocal, mkNestedValRef modref v, cloc)
+    | Some _ -> ComputeStorageForValWithValReprInfo(cenv, eenv, None, false, NoShadowLocal, mkNestedValRef modref v, cloc)
 
 /// Determine how all the F#-declared top level values, functions and members are represented, for an external module or namespace.
 let rec AddStorageForNonLocalModuleOrNamespaceRef cenv cloc acc (modref: ModuleOrNamespaceRef) (modul: ModuleOrNamespace) eenv =
@@ -1691,7 +1748,7 @@ let rec AddStorageForNonLocalModuleOrNamespaceRef cenv cloc acc (modref: ModuleO
     let acc =
         (acc, modul.ModuleOrNamespaceType.AllValsAndMembers)
         ||> Seq.fold (fun acc v ->
-            AddStorageForVal cenv.g (v, InterruptibleLazy(fun _ -> ComputeStorageForNonLocalVal cenv cloc modref v)) acc)
+            AddStorageForVal cenv.g (v, InterruptibleLazy(fun _ -> ComputeStorageForNonLocalVal cenv eenv cloc modref v)) acc)
 
     acc
 
@@ -1716,7 +1773,7 @@ let AddStorageForExternalCcu cenv eenv (ccu: CcuThunk) =
 
             (eenv, ccu.Contents.ModuleOrNamespaceType.AllValsAndMembers)
             ||> Seq.fold (fun acc v ->
-                AddStorageForVal cenv.g (v, InterruptibleLazy(fun _ -> ComputeStorageForNonLocalVal cenv cloc eref v)) acc)
+                AddStorageForVal cenv.g (v, InterruptibleLazy(fun _ -> ComputeStorageForNonLocalVal cenv eenv cloc eref v)) acc)
 
         eenv
 
