@@ -816,10 +816,6 @@ let ChooseReqdItemPackings g fclassM topValS  declist reqdItemsMap =
 // step3: CreateNewValuesForTLR
 //-------------------------------------------------------------------------
 
-/// arity info where nothing is untupled
-// REVIEW: could do better here by preserving names
-let MakeSimpleArityInfo tps n = ValReprInfo (ValReprInfo.InferTyparInfo tps, List.replicate n ValReprInfo.unnamedTopArg, ValReprInfo.unnamedRetVal)
-
 let CreateNewValuesForTLR g tlrS arityM fclassM envPackM =
 
     let createFHat (f: Val) =
@@ -830,13 +826,38 @@ let CreateNewValuesForTLR g tlrS arityM fclassM envPackM =
         let m = f.Range
         let tps, tau = f.GeneralizedType
         let argTys, retTy = stripFunTy g tau
-        let newTps = envp.ep_etps @ tps
+
+        // under realsig- we *flatten* them, under realsig+ we keep them ambient
+        let declaredMethodTpars =
+            if g.realsig then
+                // inherit parent <T,U> from the enclosing type
+                tps
+            else
+                // non-realsig must re-declare ambient typars
+                envp.ep_etps @ tps
 
         let fHatTy =
             let newArgTys = List.map typeOfVal envp.ep_aenvs @ argTys
-            mkLambdaTy g newTps newArgTys retTy
+            mkLambdaTy g declaredMethodTpars newArgTys retTy
 
-        let fHatArity = MakeSimpleArityInfo newTps (envp.ep_aenvs.Length + wf)
+        // build a ValReprInfo with exactly one group of (env + wf) unnamed args
+        let totalValParams = envp.ep_aenvs.Length + wf
+
+        // now replicate that single ArgReprInfo totalValParams times,
+        // then wrap it in a one?element list to get exactly one group
+        let templateGroup = ValReprInfo.unnamedTopArg
+        let singleGroup =
+            templateGroup
+            |> List.replicate totalValParams
+            |> List.concat
+
+        let argGroups : ArgReprInfo list list = [ singleGroup ]
+
+        let fHatArity =
+            ValReprInfo(
+              ValReprInfo.InferTyparInfo declaredMethodTpars,
+              argGroups,
+              ValReprInfo.unnamedRetVal)
 
         let fHatName =
             // Ensure that we have an g.CompilerGlobalState
@@ -844,6 +865,7 @@ let CreateNewValuesForTLR g tlrS arityM fclassM envPackM =
             g.CompilerGlobalState.Value.NiceNameGenerator.FreshCompilerGeneratedName(name, m)
 
         let fHat = mkLocalNameTypeArity f.IsCompilerGenerated m fHatName fHatTy (Some fHatArity)
+
         fHat
 
     let fs = Zset.elements tlrS
@@ -987,12 +1009,29 @@ module Pass4_RewriteAssembly =
             // Why are we applying TLR if the thing already has an arity? 
             let fOrig = ClearValReprInfo fOrig
 
+            let callTypars =
+                if penv.g.realsig then tps
+                else envp.ep_etps @ tps
+
             let fBind =
-                 mkMultiLambdaBind g fOrig letSeqPtOpt m tps vss
-                     (mkApps penv.g
-                         ((exprForVal m fHat, fHat.Type),
-                          [List.map mkTyparTy (envp.ep_etps @ tps)],
-                          aenvExprs @ vsExprs, m), bodyTy)
+                let ambientTpars = envp.ep_etps      // the ’T, ’U from the enclosing generic type
+                let localTpars   = tps                // the method’s own generic args
+                let methodEnvTpars =
+                    if penv.g.realsig then ambientTpars @ localTpars
+                    else ambientTpars @ localTpars
+
+                // DEBUG: dump the arity we’re actually applying
+                do
+                    let tyArgs  = List.length callTypars
+                    let valArgs = List.length (aenvExprs @ vsExprs)
+                    System.IO.File.AppendAllLines(@"c:\temp\results", [|sprintf ">> fRebinding calling %s at %s; typeArgs=%d, valArgs=%d" fOrig.LogicalName (m.ToString()) tyArgs valArgs|])
+
+                mkMultiLambdaBind g fOrig letSeqPtOpt m methodEnvTpars vss
+                    ( mkApps penv.g
+                        ((exprForVal m fHat, fHat.Type),
+                         [ List.map mkTyparTy callTypars ],
+                         aenvExprs @ vsExprs, m),
+                      bodyTy )
             fBind
 
         let fHatNewBinding (shortRecBinds: Bindings) (TBind(f, b, letSeqPtOpt)) =
@@ -1011,16 +1050,32 @@ module Pass4_RewriteAssembly =
             // fHat, args
             let m = fHat.Range
 
-            // Add the type variables to the front
-            let fHat_tps = envp.ep_etps @ tps
-
             // Add the 'aenv' and original taken variables to the front
-            let fHat_args = List.map List.singleton envp.ep_aenvs @ vssTake
+            let fHat_args : Val list list = [ envp.ep_aenvs @ List.concat vssTake ]
             let fHat_body = mkLetsFromBindings m envp.ep_unpack body
             let fHat_body = mkLetsFromBindings m shortRecBinds  fHat_body  // bind "f" if have short recursive calls (somewhere)
 
             // fHat binding, f rebinding
-            let fHatBind = mkMultiLambdaBind g fHat letSeqPtOpt m fHat_tps fHat_args (fHat_body, bodyTy)
+            let fHatBind =
+                let ambientTpars = envp.ep_etps
+                let localTpars   = tps
+                let methodEnvTpars =
+                    if penv.g.realsig then ambientTpars @ localTpars
+                    else ambientTpars @ localTpars
+
+                // DEBUG: verify fHat’s lambda binders vs. its arg groups
+                do
+                    let tyArgs     = List.length methodEnvTpars
+                    let groups     = List.length fHat_args
+                    let valArgs    = fHat_args |> List.sumBy List.length
+                    System.IO.File.AppendAllLines(
+                      @"c:\temp\results", [|sprintf ">> fHatNewBinding %s at %s; tyArgs=%d, groups=%d, valArgs=%d" f.LogicalName (m.ToString()) tyArgs groups valArgs|])
+
+                let fHatBind =
+                    mkMultiLambdaBind g fHat letSeqPtOpt m methodEnvTpars fHat_args
+                        (fHat_body, bodyTy)
+                fHatBind
+
             fHatBind
 
         let rebinds = binds |> List.map fRebinding
@@ -1069,15 +1124,32 @@ module Pass4_RewriteAssembly =
                 (let wf = Zmap.force fvref.Deref penv.arityM ("TransApp - wf", nameOfVal)
                  IsArityMet fvref wf tys args) ->
 
-                   let f = fvref.Deref
-                   (* replace by direct call to corresponding fHat (and additional closure args) *)
-                   let fc = Zmap.force f  penv.fclassM ("TransApp - fc", nameOfVal)
-                   let envp = Zmap.force fc penv.envPackM ("TransApp - envp", string)
-                   let fHat = Zmap.force f  penv.fHatM ("TransApp - fHat", nameOfVal)
-                   let tys = (List.map mkTyparTy envp.ep_etps) @ tys
-                   let aenvExprs = List.map (exprForVal vm) envp.ep_aenvs
-                   let args = aenvExprs @ args
-                   mkApps penv.g ((exprForVal vm fHat, fHat.Type), [tys], args, m) (* change, direct fHat call with closure (reqdTypars, aenvs) *)
+                    let f = fvref.Deref
+                    (* replace by direct call to corresponding fHat (and additional closure args) *)
+                    let fc = Zmap.force f  penv.fclassM ("TransApp - fc", nameOfVal)
+                    let envp = Zmap.force fc penv.envPackM ("TransApp - envp", string)
+                    let fHat = Zmap.force f  penv.fHatM ("TransApp - fHat", nameOfVal)
+                    let aenvExprs = List.map (exprForVal vm) envp.ep_aenvs
+                    let allArgs   = aenvExprs @ args
+                    let callTypars =
+                        if penv.g.realsig then
+                            // In realsig+ the lifted method is nested in a generic parent,
+                            // so T,U are ambient — do *not* re-declare them here
+                            tys
+                        else
+                            // In legacy mode we *must* redeclare T,U
+                            (List.map mkTyparTy envp.ep_etps) @ tys
+
+                    // DEBUG TransApp
+                    do
+                        let tyArgGroups = if List.isEmpty callTypars then 0 else 1
+                        let tyArgs      = List.length callTypars
+                        let valArgs     = List.length allArgs
+                        System.IO.File.AppendAllLines(@"c:\temp\results", [|sprintf ">> TransApp %s at %s; groups=%d, typeArgs=%d, valArgs=%d" fHat.LogicalName (m.ToString()) tyArgGroups tyArgs valArgs|])
+                    mkApps penv.g ((exprForVal m fHat, fHat.Type), [callTypars], allArgs, m)
+
+
+
         | _ ->
             if isNil tys && isNil args then
                 fx
