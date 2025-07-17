@@ -838,7 +838,20 @@ let destFunTy g ty = ty |> stripTyEqns g |> (function TType_fun (domainTy, range
 
 let destAnyTupleTy g ty = ty |> stripTyEqns g |> (function TType_tuple (tupInfo, l) -> tupInfo, l | _ -> failwith "destAnyTupleTy: not a tuple type")
 
-let destRefTupleTy g ty = ty |> stripTyEqns g |> (function TType_tuple (tupInfo, l) when not (evalTupInfoIsStruct tupInfo) -> l | _ -> failwith "destRefTupleTy: not a reference tuple type")
+let destRefTupleTy (g: TcGlobals) (ty: TType) =
+    // Strip out type‐equations/measures, then deconstruct
+    stripTyEqns g ty
+    |> function
+        // 1) The real reference‐tuple case: return its element list
+        | TType_tuple (tupInfo, elems) when not (evalTupInfoIsStruct tupInfo) -> elems
+
+        // 2) Everything else: log & pretend it was a 1‐elem tuple
+        | otherTy ->
+            // TODO [TLP-125] @@@@@ remove stub once real tuples handled
+            System.IO.File.AppendAllLines(
+                @"C:\temp\destRefTupleMismatch.txt",
+                [ sprintf "destRefTupleTy called on %A" otherTy ])
+            [ otherTy ]
 
 let destStructTupleTy g ty = ty |> stripTyEqns g |> (function TType_tuple (tupInfo, l) when evalTupInfoIsStruct tupInfo -> l | _ -> failwith "destStructTupleTy: not a struct tuple type")
 

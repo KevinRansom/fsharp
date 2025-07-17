@@ -314,8 +314,26 @@ let destLambdaWithValReprInfo g amap valReprInfo (lambdaExpr, ty) =
     match tryDestLambdaWithValReprInfo g amap valReprInfo (lambdaExpr, ty) with
     | Some res -> res
     | None ->
-        // temporary fallback: treat mismatch as no-op
-        ([], None, None, [], lambdaExpr, ty)
+        // 1) Compute expected argument group sizes
+        let expected = valReprInfo.ArgInfos |> List.map List.length
+
+        // 2) Count actual number of nested lambdas
+        let rec countLambdas (expr, _ty) =
+            match stripDebugPoints expr with
+            | Expr.Lambda (_, _, _, _, body, _, bodyTy) -> 1 + countLambdas (body, bodyTy)
+            | _ -> 0
+
+        // 3) Compute actual
+        let actual = countLambdas (lambdaExpr, ty)
+
+        // 4) Log the mismatch
+        System.IO.File.AppendAllLines(
+            @"C:\temp\destLambdaMismatch.txt",
+            [ sprintf "Lambda @ %O expected=%A actual=%d" lambdaExpr.Range expected actual ]
+        )
+
+        // 5) Raise error
+        error(Error(FSComp.SR.typrelInvalidValue(), lambdaExpr.Range))
 
 let IteratedAdjustArityOfLambdaBody g arities vsl body  =
       (arities, vsl, ([], body)) |||> List.foldBack2 (fun arities vs (allvs, body) ->
