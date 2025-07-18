@@ -2412,9 +2412,9 @@ let rec OptimizeExpr cenv (env: IncrementalOptimizationEnv) expr =
         | Some newExpr -> OptimizeExpr cenv env newExpr
         | None -> OptimizeApplication cenv env (f, fty, tyargs, argsl, m) 
 
-    | Expr.Lambda (_lambdaId, _, _, argvs, _body, m, bodyTy) -> 
+    | Expr.Lambda (_lambdaId, _, _, argvs, _body, _m, bodyTy) -> 
         let valReprInfo = ValReprInfo ([], [argvs |> List.map (fun _ -> ValReprInfo.unnamedTopArg1)], ValReprInfo.unnamedRetVal)
-        let ty = mkMultiLambdaTy g m argvs bodyTy
+        let ty = mkMultiLambdaTy g argvs bodyTy
         OptimizeLambdas None cenv env valReprInfo expr ty
 
     | Expr.TyLambda (_lambdaId, tps, _body, _m, bodyTy) -> 

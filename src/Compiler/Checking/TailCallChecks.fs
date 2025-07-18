@@ -447,7 +447,7 @@ and CheckLambda cenv expr (argvs, m, bodyTy) (tailCall: TailCall) =
     let valReprInfo =
         ValReprInfo([], [ argvs |> List.map (fun _ -> ValReprInfo.unnamedTopArg1) ], ValReprInfo.unnamedRetVal)
 
-    let ty = mkMultiLambdaTy cenv.g m argvs bodyTy in
+    let ty = mkMultiLambdaTy cenv.g argvs bodyTy in
     CheckLambdas false None cenv false valReprInfo tailCall.AtExprLambda false expr m ty PermitByRefExpr.Yes
 
 and CheckTyLambda cenv expr (tps, m, bodyTy) (tailCall: TailCall) =

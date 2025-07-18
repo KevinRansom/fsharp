@@ -1392,7 +1392,7 @@ and CheckApplication cenv env expr (f, tyargs, argsl, m) ctxt =
 
 and CheckLambda cenv env expr (argvs, m, bodyTy) =
     let valReprInfo = ValReprInfo ([], [argvs |> List.map (fun _ -> ValReprInfo.unnamedTopArg1)], ValReprInfo.unnamedRetVal)
-    let ty = mkMultiLambdaTy cenv.g m argvs bodyTy in
+    let ty = mkMultiLambdaTy cenv.g argvs bodyTy in
     CheckLambdas false None cenv env false valReprInfo false expr m ty PermitByRefExpr.Yes
 
 and CheckTyLambda cenv env expr (tps, m, bodyTy) =

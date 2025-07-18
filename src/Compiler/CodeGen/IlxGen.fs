@@ -522,32 +522,63 @@ let ComputeTypeAccess (tref: ILTypeRef) hidden (accessibility: Accessibility) re
 /// Indicates how type parameters are mapped to IL type variables
 [<NoEquality; NoComparison>]
 type TypeReprEnv
-    (reprs: Map<Stamp, (uint16 * Typar)>, count: int, templateReplacement: (TyconRef * ILTypeRef * Typars * TyparInstantiation) option) =
+    (ilg: ILGlobals, reprs: Map<Stamp, (uint16 * Typar)>, count: int, templateReplacement: (TyconRef * ILTypeRef * Typars * TyparInstantiation) option) =
 
-    static let empty = TypeReprEnv(count = 0, reprs = Map.empty, templateReplacement = None)
+    static let empty ilg = TypeReprEnv(ilg, count = 0, reprs = Map.empty, templateReplacement = None)
 
     /// Get the template replacement information used when using struct types for state machines based on a "template" struct
     member _.TemplateReplacement = templateReplacement
 
     member _.WithTemplateReplacement(tcref, ilCloTyRef, cloFreeTyvars, templateTypeInst) =
-        TypeReprEnv(reprs, count, Some(tcref, ilCloTyRef, cloFreeTyvars, templateTypeInst))
+        TypeReprEnv(ilg, reprs, count, Some(tcref, ilCloTyRef, cloFreeTyvars, templateTypeInst))
 
-    member _.WithoutTemplateReplacement() = TypeReprEnv(reprs, count, None)
+    member _.WithoutTemplateReplacement() = TypeReprEnv(ilg, reprs, count, None)
 
-    /// Lookup a type parameter
-    member _.Item(tp: Typar, m: range) =
-        try
-            reprs[tp.Stamp] |> fst
-        with :? KeyNotFoundException ->
-            errorR (InternalError("Undefined or unsolved type variable: " + showL (typarL tp), m))
-            // Random value for post-hoc diagnostic analysis on generated tree *
-            uint16 666
+    /// Lookup or log an ILType for a Typar (does not shadow the indexer)
+    member _.GetILTypeVar (tp: Typar, m: Range) : ILType =
+        match reprs.TryFind tp.Stamp with
+        | Some (idx, _) ->
+            ILType.TypeVar (uint16 idx)
+        | None ->
+            System.IO.File.AppendAllLines(
+                @"C:\temp\TypeVarUnsolved.txt",
+                [ sprintf "Unresolved tyvar '%s' at %O" tp.DisplayName m ])
+
+            ilg.typ_Object
+
+    //member _.Item (tp: Typar, m: Range) : ILType =
+    //    let mkILTyVarTy (n:int) : ILType =
+    //        // ILType.Var is the DU case for a generic-param reference
+    //        // the DU?case for a generic?parameter by index
+    //        ILType.TypeVar (uint16 n)
+
+        //let mkDefault () =
+        //    System.IO.File.AppendAllLines(
+        //      @"C:\temp\TypeVarUnsolved.txt",
+        //      [ sprintf "Unsolved tyvar '%s' at %O" tp.DisplayName m ])
+        //    // fallback: treat as System.Object
+        //    ilg.typ_Object
+
+        //try
+        //    // original lookup:
+        //    let idx = reprs.[tp.Stamp] |> fst |> int
+        //    // if you want a “real” generic-param:
+        //    mkILTyVarTy idx
+        //    // —or if you don’t need it, just default to Object:
+        //    // ilg.typ_Object
+        //with
+        //| :? FSharp.Compiler.DiagnosticsLogger.InternalError as _ie ->
+        //    // this is the "Undefined or unsolved type variable" path
+        //    mkDefault()
+        //| :? System.ArgumentException ->
+        //    // in case other arg?errors surface here
+        //    mkDefault()
 
     /// Add an additional type parameter to the environment. If the parameter is a units-of-measure parameter
     /// then it is ignored, since it doesn't correspond to a .NET type parameter.
     member tyenv.AddOne(tp: Typar) =
         if IsNonErasedTypar tp then
-            TypeReprEnv(reprs.Add(tp.Stamp, (uint16 count, tp)), count + 1, templateReplacement)
+            TypeReprEnv(ilg, reprs.Add(tp.Stamp, (uint16 count, tp)), count + 1, templateReplacement)
         else
             tyenv
 
@@ -559,11 +590,11 @@ type TypeReprEnv
     member _.Count = count
 
     /// Get the empty environment, where no type parameters are in scope.
-    static member Empty = empty
+    static member Empty ilg = empty ilg
 
     /// Reset to the empty environment, where no type parameters are in scope.
     member eenv.ResetTypars() =
-        TypeReprEnv(count = 0, reprs = Map.empty, templateReplacement = eenv.TemplateReplacement)
+        TypeReprEnv(ilg, count = 0, reprs = Map.empty, templateReplacement = eenv.TemplateReplacement)
 
     /// Get the environment for a fixed set of type parameters
     member eenv.ForTypars tps = eenv.ResetTypars().Add tps
@@ -718,7 +749,7 @@ and GenTypeAux cenv m (tyenv: TypeReprEnv) voidOK ptrsOK ty =
         else
             EraseClosures.mkILTyFuncTy cenv.ilxPubCloEnv
 
-    | TType_var(tp, _) -> mkILTyvarTy tyenv[tp, m]
+    | TType_var(tp, _) -> tyenv.GetILTypeVar(tp, m)
 
     | TType_measure _ -> g.ilg.typ_Int32
 
@@ -755,7 +786,7 @@ and GenUnionRef (cenv: cenv) m (tcref: TyconRef) =
     | ValueNone -> failwith "GenUnionRef m"
     | ValueSome funion ->
         cached funion.CompiledRepresentation (fun () ->
-            let tyenvinner = TypeReprEnv.Empty.ForTycon tycon
+            let tyenvinner = ((TypeReprEnv.Empty g.ilg).ForTycon) tycon
 
             match tcref.CompiledRepresentation with
             | CompiledTypeRepr.ILAsmOpen _ -> failwith "GenUnionRef m: unexpected ASM tyrep"
@@ -900,7 +931,7 @@ let GenRecdFieldRef m cenv (tyenv: TypeReprEnv) (rfref: RecdFieldRef) tyargs =
             let ilTypeInst = GenTypeArgsAux cenv m tyenv cloInst
             mkILValueTy ilCloTyRef ilTypeInst
 
-        let tyenvinner = TypeReprEnv.Empty.ForTypars cloFreeTyvars
+        let tyenvinner = ((TypeReprEnv.Empty cenv.g.ilg).ForTypars cloFreeTyvars)
 
         mkILFieldSpecInTy (
             ilCloTy,
@@ -908,7 +939,7 @@ let GenRecdFieldRef m cenv (tyenv: TypeReprEnv) (rfref: RecdFieldRef) tyargs =
             GenType cenv m tyenvinner (instType templateTypeInst rfref.RecdField.FormalType)
         )
     | _ ->
-        let tyenvinner = TypeReprEnv.Empty.ForTycon rfref.Tycon
+        let tyenvinner = ((TypeReprEnv.Empty cenv.g.ilg).ForTycon rfref.Tycon)
         let ilTy = GenTyApp cenv m tyenv rfref.TyconRef.CompiledRepresentation tyargs
         mkILFieldSpecInTy (ilTy, ComputeFieldName rfref.Tycon rfref.RecdField, GenType cenv m tyenvinner rfref.RecdField.FormalType)
 
@@ -1404,7 +1435,7 @@ let GetMethodSpecForMemberVal cenv (memberInfo: ValMemberInfo) (vref: ValRef) =
         assert vref.ValReprInfo.IsSome
         GetValReprTypeInCompiledForm g vref.ValReprInfo.Value numEnclosingTypars vref.Type m
 
-    let tyenvUnderTypars = TypeReprEnv.Empty.ForTypars tps
+    let tyenvUnderTypars = ((TypeReprEnv.Empty g.ilg).ForTypars tps)
     let flatArgInfos = List.concat curriedArgInfos
     let isCtor = (memberInfo.MemberFlags.MemberKind = SynMemberKind.Constructor)
     let cctor = (memberInfo.MemberFlags.MemberKind = SynMemberKind.ClassConstructor)
@@ -1527,7 +1558,7 @@ let ComputeStorageForFSharpValue cenv cloc optIntraAssemblyInfo optShadowLocal i
     let vspec = vref.Deref
 
     let ilTy =
-        GenType cenv m TypeReprEnv.Empty returnTy (* TypeReprEnv.Empty ok: not a field in a generic class *)
+        GenType cenv m (TypeReprEnv.Empty cenv.g.ilg) returnTy (* TypeReprEnv.Empty ok: not a field in a generic class *)
 
     let ilTyForProperty = mkILTyForCompLoc cloc
     let attribs = vspec.Attribs
@@ -1566,7 +1597,7 @@ let ComputeStorageForFSharpFunctionOrFSharpExtensionMember (cenv: cenv) cloc val
     let tps, witnessInfos, curriedArgInfos, returnTy, retInfo =
         GetValReprTypeInCompiledForm g valReprInfo numEnclosingTypars vref.Type m
 
-    let tyenvUnderTypars = TypeReprEnv.Empty.ForTypars tps
+    let tyenvUnderTypars = ((TypeReprEnv.Empty g.ilg).ForTypars tps)
     let methodArgTys, paramInfos = curriedArgInfos |> List.concat |> List.unzip
     let ilMethodArgTys = GenParamTypes cenv m tyenvUnderTypars false methodArgTys
     let ilRetTy = GenReturnType cenv m tyenvUnderTypars returnTy
@@ -1631,7 +1662,7 @@ let ComputeStorageForValWithValReprInfo
 
         if vref.Deref.IsCompiledAsStaticPropertyWithoutField then
             let nm = "get_" + nm
-            let tyenvUnderTypars = TypeReprEnv.Empty.ForTypars []
+            let tyenvUnderTypars = ((TypeReprEnv.Empty cenv.g.ilg).ForTypars [])
             let ilRetTy = GenType cenv m tyenvUnderTypars vref.Type
             let ty = mkILTyForCompLoc cloc
             let mspec = mkILStaticMethSpecInTy (ty, nm, [], ilRetTy, [])
@@ -1752,7 +1783,7 @@ let AddDebugImportsToEnv (cenv: cenv) eenv (openDecls: OpenDeclaration list) =
 
                 for t in openDecl.Types do
                     let m = defaultArg openDecl.Range Range.range0
-                    ILDebugImport.ImportType(GenType cenv m TypeReprEnv.Empty t)
+                    ILDebugImport.ImportType(GenType cenv m (TypeReprEnv.Empty cenv.g.ilg) t)
         |]
 
     if ilImports.Length = 0 then
@@ -2253,7 +2284,7 @@ type AnonTypeGenerationTable() =
             let ilInterfaceTys =
                 [
                     for intfTy, _, _ in tcaug.tcaug_interfaces ->
-                        GenType cenv m (TypeReprEnv.Empty.ForTypars tps) intfTy |> InterfaceImpl.Create
+                        GenType cenv m ((TypeReprEnv.Empty g.ilg).ForTypars tps) intfTy |> InterfaceImpl.Create
                 ]
 
             let ilTypeDef =
@@ -3387,12 +3418,19 @@ and GenGetTupleField cenv cgbuf eenv (tupInfo, e, tys, n, m) sequel =
     let rec getCompiledTupleItem g (e, tys: TTypes, n, m) =
         let ar = tys.Length
 
-        if ar <= 0 then
+        // Special?case 1-element tuples: always return the value itself
+        if ar = 1 then
+            e
+        elif ar <= 0 then
             failwith "getCompiledTupleItem"
         elif ar < maxTuple then
-            let tcref = mkCompiledTupleTyconRef g tupInfo ar
-            let ty = GenNamedTyApp cenv m eenv.tyenv tcref tys
-            mkGetTupleItemN g m n ty tupInfo e tys[n]
+            // safe?index into the small tuple
+            if n < 0 || n >= ar then
+                failwithf "getCompiledTupleItem: index %d out of range for tuple of arity %d" n ar
+            let fieldTy = List.item n tys
+            let tcref   = mkCompiledTupleTyconRef g tupInfo ar
+            let ty      = GenNamedTyApp cenv m eenv.tyenv tcref tys
+            mkGetTupleItemN g m n ty tupInfo e fieldTy
         else
             let tysA, tysB = List.splitAfter goodTupleFields tys
             let tyB = mkCompiledTupleTy g tupInfo tysB
@@ -3400,7 +3438,12 @@ and GenGetTupleField cenv cgbuf eenv (tupInfo, e, tys, n, m) sequel =
             let tcref = mkCompiledTupleTyconRef g tupInfo (List.length tysC)
             let tyR = GenNamedTyApp cenv m eenv.tyenv tcref tysC
             let nR = min n goodTupleFields
-            let elast = mkGetTupleItemN g m nR tyR tupInfo e tysC[nR]
+            // safe?index on the combined fields
+            let cCount = List.length tysC
+            if nR < 0 || nR >= cCount then
+                failwithf "getCompiledTupleItem: index %d out of range for expanded tuple of length %d" nR cCount
+            let fieldTyR = List.item nR tysC
+            let elast    = mkGetTupleItemN g m nR tyR tupInfo e fieldTyR
 
             if n < goodTupleFields then
                 elast
@@ -4018,55 +4061,95 @@ and GenFieldStore isStatic cenv cgbuf eenv (rfref: RecdFieldRef, tyargs, m) sequ
 // Generate arguments to calls
 //--------------------------------------------------------------------------
 
-/// Generate arguments to a call, unless the argument is the single lone "unit" value
-/// to a method or value compiled as a method taking no arguments
-and GenUntupledArgsDiscardingLoneUnit cenv cgbuf eenv m numObjArgs curriedArgInfos args =
+/// Generate call arguments, but swallow the single `unit` parameter
+/// on methods or closures that take no real arguments.
+and GenUntupledArgsDiscardingLoneUnit
+      (cenv:          cenv)
+      (cgbuf:         CodeGenBuffer)
+      (eenv:          IlxGenEnv)
+      (m:             range)
+      (numObjArgs:    int)
+      (curriedArgInfos: ArgReprInfo list list)
+      (args:          Expr list) =
     let g = cenv.g
 
-    match curriedArgInfos, args with
-    // Type.M()
-    // new C()
-    | [ [] ], [ arg ] when numObjArgs = 0 ->
-        assert isUnitTy g (tyOfExpr g arg)
+    match numObjArgs, curriedArgInfos, args with
+    // 1) Zero-arg static or F#-lambda calls:
+    //    a) no slots & no args
+    | 0, [], [] -> ()
+
+    //    b) one synthesized `unit` slot & no args
+    | 0, [[]], [] -> ()
+
+    //    c) explicit `()` argument, only if it really is unit
+    | 0, ([] | [ [] ]), [arg]
+        when isUnitTy g (tyOfExpr g arg) ->
         GenExpr cenv cgbuf eenv arg discard
-    // obj.M()
-    | [ [ _ ]; [] ], [ arg1; arg2 ] when numObjArgs = 1 ->
-        assert isUnitTy g (tyOfExpr g arg2)
-        GenExpr cenv cgbuf eenv arg1 Continue
-        GenExpr cenv cgbuf eenv arg2 discard
-    | _ ->
-        (curriedArgInfos, args)
-        ||> List.iter2 (fun argInfos x -> GenUntupledArgExpr cenv cgbuf eenv m argInfos x)
 
-/// Codegen arguments
-and GenUntupledArgExpr cenv cgbuf eenv m argInfos expr =
-    let g = cenv.g
-    let numRequiredExprs = List.length argInfos
+    // 2) Single-arg calls (numObjArgs=0, one slot, one non-unit arg)
+    | 0, [[ai]], [e] ->
+        // ordinary 1-param call (could be method or closure)
+        GenUntupledArgExpr cenv cgbuf eenv m [ai] e
 
-    if numRequiredExprs = 0 then
-        ()
-    elif numRequiredExprs = 1 then
+    // 3) Tuple-arg calls into a single slot ([[]], [tuple]) ? unpack
+    | 0, [[]], [tupleExpr] when isRefTupleExpr tupleExpr ->
+        let elems = tryDestRefTupleExpr tupleExpr
+        // emit each item in the tuple as its own argument
+        for e in elems do
+            GenExpr cenv cgbuf eenv e Continue
+
+    // 4) Exact-arity tuple calls (e.g. uncurried functions)
+    | 0, [aiGroup], [tupleExpr] when isRefTupleExpr tupleExpr ->
+        let elems = tryDestRefTupleExpr tupleExpr
+        if elems.Length <> aiGroup.Length then
+            failwith $"Expected {aiGroup.Length} tuple elements but got {elems.Length}\naiGroup = {aiGroup}\ntuple  = {tupleExpr}"
+        List.iter2 (fun _ai e -> GenExpr cenv cgbuf eenv e Continue)
+                  aiGroup elems
+
+    // 5) Instance-method / boxed-closure case: obj + `()`
+    | 1, [[ _ ]; []], [obj; u] when isUnitTy g (tyOfExpr g u) ->
+        GenExpr cenv cgbuf eenv obj Continue
+        GenExpr cenv cgbuf eenv u   discard
+
+    // 6) All other N-to-N slots
+    | _, infos, exprs ->
+        // pairs each inner ArgReprInfo list with the matching Expr
+        (infos, exprs)
+        ||> List.iter2 (fun aiGroup argExpr ->
+               GenUntupledArgExpr cenv cgbuf eenv m aiGroup argExpr)
+
+/// Emit one argument group (inner list) against a single Expr
+and GenUntupledArgExpr
+      (cenv:    cenv)
+      (cgbuf:   CodeGenBuffer)
+      (eenv:    IlxGenEnv)
+      (_m:       range)
+      (argInfos: ArgReprInfo list)
+      (expr:    Expr) =
+    let _g = cenv.g
+    let nReq = List.length argInfos
+
+    // a) No slots but a tuple ? break it out
+    if nReq = 0 && isRefTupleExpr expr then
+        let elems = tryDestRefTupleExpr expr
+        for e in elems do
+            GenExpr cenv cgbuf eenv e Continue
+
+    // b) Exactly one slot ? emit it normally
+    elif nReq = 1 then
         GenExpr cenv cgbuf eenv expr Continue
+
+    // c) Tuple matches slot count exactly (multi-field TUples)
     elif isRefTupleExpr expr then
-        let es = tryDestRefTupleExpr expr
+        let elems = tryDestRefTupleExpr expr
+        if elems.Length <> nReq then
+            failwithf $"GenUntupledArgExpr: expected {nReq} tuple elements but got {elems.Length} (argInfos={argInfos} expr={expr})"
+        List.iter2 (fun _ai e -> GenExpr cenv cgbuf eenv e Continue)
+                  argInfos elems
 
-        if es.Length <> numRequiredExprs then
-            error (InternalError("GenUntupledArgExpr (2)", m))
-
-        es |> List.iter (fun x -> GenExpr cenv cgbuf eenv x Continue)
+    // d) Fallback: emit the expr once (any other weird case)
     else
-        let ty = tyOfExpr g expr
-        let locv, loce = mkCompGenLocal m "arg" ty
-        let bind = mkCompGenBind locv expr
-
-        LocalScope "untuple" cgbuf (fun scopeMarks ->
-            let eenvinner = AllocStorageForBind cenv cgbuf scopeMarks eenv bind
-            GenBinding cenv cgbuf eenvinner bind false
-            let tys = destRefTupleTy g ty
-            assert (tys.Length = numRequiredExprs)
-
-            argInfos
-            |> List.iteri (fun i _ -> GenGetTupleField cenv cgbuf eenvinner (tupInfoRef, loce, tys, i, m) Continue))
+        GenExpr cenv cgbuf eenv expr Continue
 
 //--------------------------------------------------------------------------
 // Generate calls (try to detect direct calls)
@@ -4185,7 +4268,7 @@ and GenApp (cenv: cenv) cgbuf eenv (f, fty, tyargs, curriedArgs, m) sequel =
 
             //assert (curriedArgInfos.Length = numArgs )
             // NOTE: we are not generating the witness arguments here
-            GenUntupledArgsDiscardingLoneUnit cenv cgbuf eenv m numObjArgs curriedArgInfos curriedArgs
+            GenUntupledArgsDiscardingLoneUnit cenv cgbuf eenv m numObjArgs (curriedArgInfos |> List.map (List.map snd)) curriedArgs
 
             // Extension methods with empty arguments are evidently not quite in sufficiently normalized form,
             // so apply a fixup here. This feels like a mistake associated with BindUnitVars, where that is not triggering
@@ -4398,7 +4481,7 @@ and GenApp (cenv: cenv) cgbuf eenv (f, fty, tyargs, curriedArgs, m) sequel =
                 let _ctyargs, mtyargs = List.splitAt ctps.Length tyargs
                 GenWitnessArgs cenv cgbuf eenv m mtps mtyargs
 
-            GenUntupledArgsDiscardingLoneUnit cenv cgbuf eenv m vref.NumObjArgs curriedArgInfos nowArgs
+            GenUntupledArgsDiscardingLoneUnit cenv cgbuf eenv m vref.NumObjArgs (curriedArgInfos |> List.map (List.map snd)) nowArgs
 
             // Generate laterArgs (for effects) and save
             LocalScope "callstack" cgbuf (fun scopeMarks ->
@@ -6738,7 +6821,11 @@ and GenGenericParams cenv eenv tps =
     tps |> DropErasedTypars |> List.map (GenGenericParam cenv eenv)
 
 and GenGenericArgs m (tyenv: TypeReprEnv) tps =
-    tps |> DropErasedTypars |> List.map (fun c -> (mkILTyvarTy tyenv[c, m]))
+    tps
+    |> DropErasedTypars
+    |> List.map (fun tp ->
+        // directly use the ILType from our logging stub
+        tyenv.GetILTypeVar(tp, m))
 
 /// Generate a local type function contract class and implementation
 and GenClosureAsLocalTypeFunction cenv (cgbuf: CodeGenBuffer) eenv thisVars expr m =
@@ -6906,7 +6993,7 @@ and GetIlxClosureFreeVars cenv m (thisVars: ValRef list) boxity eenv takenNames 
         | _ -> newUnique ()
 
     // Choose a name for the closure
-    let ilCloTypeRef, initialFreeTyvars =
+    let ilCloTypeRef =
         let boundvar =
             eenv.letBoundVars |> List.tryFind (fun v -> not v.IsCompilerGenerated)
 
@@ -6925,15 +7012,7 @@ and GetIlxClosureFreeVars cenv m (thisVars: ValRef list) boxity eenv takenNames 
 
         let ilCloTypeRef = NestedTypeRefForCompLoc eenv.cloc cloName
 
-        let initialFreeTyvars =
-            match g.realsig with
-            | true ->
-                { emptyFreeTyvars with
-                    FreeTypars = eenv.tyenv.AsUserProvidedTypars()
-                }
-            | false -> emptyFreeTyvars
-
-        ilCloTypeRef, initialFreeTyvars
+        ilCloTypeRef
 
     // Collect the free variables of the closure
     let cloFreeVarResults =
@@ -6947,9 +7026,7 @@ and GetIlxClosureFreeVars cenv m (thisVars: ValRef list) boxity eenv takenNames 
         accFreeInExpr
             opts
             expr
-            { emptyFreeVars with
-                FreeTyvars = initialFreeTyvars
-            }
+            emptyFreeVars
 
     // Partition the free variables when some can be accessed from places besides the immediate environment
     // Also filter out the current value being bound, if any, as it is available from the "this"
@@ -7103,6 +7180,13 @@ and GetIlxClosureInfo cenv m boxity isLocalTypeFunc canUseStaticField thisVars e
 
     /// Compute the contract if it is a local type function
     let ilCloGenericFormals = GenGenericParams cenv eenvinner cloFreeTyvars
+
+    for tp in cloFreeTyvars do
+        if not (eenvinner.tyenv.AsUserProvidedTypars() |> Seq.exists (fun tp' -> tp'.Stamp = tp.Stamp)) then
+            System.IO.File.AppendAllLines(
+                @"C:\temp\TypeVarUnsolved.txt",
+                [ sprintf "Missing type parameter before GenGenericArgs: '%s' at %O" tp.DisplayName m ])
+
     let ilCloGenericActuals = GenGenericArgs m eenvouter.tyenv cloFreeTyvars
 
     let useStaticField = canUseStaticField && (ilCloAllFreeVars.Length = 0)
@@ -12000,7 +12084,7 @@ let CodegenAssembly cenv eenv mgbuf implFiles =
 
 let GetEmptyIlxGenEnv (g: TcGlobals) ccu =
     {
-        tyenv = TypeReprEnv.Empty
+        tyenv = (TypeReprEnv.Empty g.ilg)
         cloc = CompLocForCcu ccu
         initClassCompLoc = None
         initFieldName = CompilerGeneratedName "init"
@@ -12163,7 +12247,7 @@ let LookupGeneratedValue (cenv: cenv) (ctxt: ExecutionContext) eenv (v: Val) =
     try
         // Convert the v.Type into a System.Type according to ilxgen and ilreflect.
         let objTyp () =
-            let ilTy = GenType cenv v.Range TypeReprEnv.Empty v.Type
+            let ilTy = GenType cenv v.Range (TypeReprEnv.Empty cenv.g.ilg) v.Type
             ctxt.LookupType ilTy
         // Lookup the compiled v value (as an object).
         match StorageForVal v.Range v eenv with

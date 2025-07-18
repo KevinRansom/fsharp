@@ -1265,15 +1265,55 @@ let mkIteratedFunTy g dl r = List.foldBack (mkFunTy g) dl r
 
 let mkLambdaTy g tps tys bodyTy = mkForallTyIfNeeded tps (mkIteratedFunTy g tys bodyTy)
 
-let mkLambdaArgTy m tys = 
-    match tys with 
-    | [] -> error(InternalError("mkLambdaArgTy", m))
-    | [h] -> h 
-    | _ -> mkRawRefTupleTy tys
+/// Apply a named TyconRef to a list of type arguments
+let mkTyconApp (g: TcGlobals) (tcref: EntityRef) (args: TType list) : TType =
+    TType_app (tcref, args, g.knownWithoutNull)
 
-let typeOfLambdaArg m vs = mkLambdaArgTy m (typesOfVals vs)
+/// Build an F# tuple‐type node from its element types:
+///   []    → unit  
+///   [A]   → A  
+///   [A;B]…[A;…;G]   → Tuple<A,…,G>  
+///   [A;…;H;I;J]     → Tuple<A,…,G, Tuple<H,I,J>>
+let mkTypeTuple (g: TcGlobals) (tys: TType list) : TType =
+    match tys with
+    | []    -> g.unit_ty
+    | [ty]  -> ty
+    | _ ->
+        // Reference‐tuple tycon refs for arities 1..8
+        let tupleTcrefs : EntityRef[] =
+          [| g.ref_tuple1_tcr
+             g.ref_tuple2_tcr
+             g.ref_tuple3_tcr
+             g.ref_tuple4_tcr
+             g.ref_tuple5_tcr
+             g.ref_tuple6_tcr
+             g.ref_tuple7_tcr
+             g.ref_tuple8_tcr |]
 
-let mkMultiLambdaTy g m vs bodyTy = mkFunTy g (typeOfLambdaArg m vs) bodyTy 
+        let rec build elems =
+            let n = List.length elems
+            if n <= 8 then
+                // Pick the matching TyconRef (arity 1 → index 0, …)
+                mkTyconApp g tupleTcrefs.[n - 1] elems
+            else
+                // First 7 elements, then nest the rest as an 8‐tuple
+                let first7, rest = List.splitAt 7 elems
+                let tailTuple    = build rest
+                mkTyconApp g tupleTcrefs.[7] (first7 @ [tailTuple])
+
+        build tys
+
+/// The zero/one/multi-arg dispatcher for lambdas,
+/// now invoking mkTypeTuple for multi-arg cases
+let mkLambdaArgTy (g: TcGlobals) (ltys: TType list) : TType =
+    match ltys with
+    | []    -> g.unit_ty
+    | [ty]  -> ty
+    | tys   -> mkTypeTuple g tys
+
+let typeOfLambdaArg g vs = mkLambdaArgTy g (typesOfVals vs)
+
+let mkMultiLambdaTy g vs bodyTy = mkFunTy g (typeOfLambdaArg g vs) bodyTy 
 
 /// When compiling FSharp.Core.dll we have to deal with the non-local references into
 /// the library arising from env.fs. Part of this means that we have to be able to resolve these
@@ -1393,7 +1433,7 @@ let mkLambdas g m tps (vs: Val list) (body, bodyTy) =
     mkTypeLambda m tps (List.foldBack (fun v (e, ty) -> mkLambda m v (e, ty), mkFunTy g v.Type ty) vs (body, bodyTy))
 
 let mkMultiLambdasCore g m vsl (body, bodyTy) = 
-    List.foldBack (fun v (e, ty) -> mkMultiLambda m v (e, ty), mkFunTy g (typeOfLambdaArg m v) ty) vsl (body, bodyTy)
+    List.foldBack (fun v (e, ty) -> mkMultiLambda m v (e, ty), mkFunTy g (typeOfLambdaArg g v) ty) vsl (body, bodyTy)
 
 let mkMultiLambdas g m tps vsl (body, bodyTy) = 
     mkTypeLambda m tps (mkMultiLambdasCore g m vsl (body, bodyTy) )
@@ -1407,7 +1447,7 @@ let mkMemberLambdas g m tps ctorThisValOpt baseValOpt vsl (body, bodyTy) =
             | [] -> error(InternalError("mk_basev_multi_lambdas_core: can't attach a basev to a non-lambda expression", m))
             | h :: t -> 
                 let body, bodyTy = mkMultiLambdasCore g m t (body, bodyTy)
-                (rebuildLambda m ctorThisValOpt baseValOpt h (body, bodyTy), (mkFunTy g (typeOfLambdaArg m h) bodyTy))
+                (rebuildLambda m ctorThisValOpt baseValOpt h (body, bodyTy), (mkFunTy g (typeOfLambdaArg g h) bodyTy))
     mkTypeLambda m tps expr
 
 let mkMultiLambdaBind g v letSeqPtOpt m tps vsl (body, bodyTy) = 
@@ -1805,12 +1845,31 @@ let GetTopTauTypeInFSharpForm g (curriedArgInfos: ArgReprInfo list list) tau m =
     if nArgInfos <> argTys.Length then 
         error(Error(FSComp.SR.tastInvalidMemberSignature(), m))
 
-    let argTysl = 
-        (curriedArgInfos, argTys) ||> List.map2 (fun argInfos argTy -> 
-            match argInfos with 
-            | [] -> [ (g.unit_ty, ValReprInfo.unnamedTopArg1) ]
-            | [argInfo] -> [ (argTy, argInfo) ]
-            | _ -> List.zip (destRefTupleTy g argTy) argInfos) 
+    let argTysl =
+        (curriedArgInfos, argTys) ||> List.map2 (fun argInfos argTy ->
+            match argInfos with
+            | [] ->
+                [ (g.unit_ty, ValReprInfo.unnamedTopArg1) ]
+
+            | [ argInfo ] ->
+                [ (argTy, argInfo) ]
+
+            | _ ->
+                // TODO [TLP-127] @@@@@ remove stub when tuple shapes align
+                let elems = destRefTupleTy g argTy
+                let zippedArgs =
+                    try
+                        List.zip elems argInfos
+                    with :? System.ArgumentException ->
+                        System.IO.File.AppendAllLines(
+                            @"C:\temp\GetTopTauTypeMismatch.txt",
+                            [ sprintf
+                                "GetTopTauTypeInFSharpForm mismatch at %O: expected=%d actual=%d"
+                                m
+                                elems.Length
+                                argInfos.Length ])
+                        []
+                zippedArgs)
 
     argTysl, retTy
 

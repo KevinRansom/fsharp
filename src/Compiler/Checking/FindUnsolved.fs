@@ -88,9 +88,9 @@ let rec accExpr (cenv: cenv) (env: env) expr =
         accExpr cenv env f
         accExprs cenv env argsl
 
-    | Expr.Lambda (_, _ctorThisValOpt, _baseValOpt, argvs, _body, m, bodyTy) ->
+    | Expr.Lambda (_, _ctorThisValOpt, _baseValOpt, argvs, _body, _m, bodyTy) ->
         let valReprInfo = ValReprInfo ([], [argvs |> List.map (fun _ -> ValReprInfo.unnamedTopArg1)], ValReprInfo.unnamedRetVal)
-        let ty = mkMultiLambdaTy cenv.g m argvs bodyTy
+        let ty = mkMultiLambdaTy cenv.g argvs bodyTy
         accLambdas cenv env valReprInfo expr ty
 
     | Expr.TyLambda (_, tps, _body, m, bodyTy)  ->

@@ -585,12 +585,12 @@ and zipTupleStructuresAndTypes g tss tys =
     let tys = List.collect snd tstys // link fringes
     tss, tys
 
-let zipCallPatternArgTys m g (callPattern: TupleStructure list) (vss: Val list list) =
+let zipCallPatternArgTys g (callPattern: TupleStructure list) (vss: Val list list) =
     let vss = List.take callPattern.Length vss // drop excessive tys if callPattern shorter
 
     let tstys =
         List.map2
-            (fun ts vs -> let ts, tyfringe = zipTupleStructureAndType g ts (typeOfLambdaArg m vs) in ts, (tyfringe, vs))
+            (fun ts vs -> let ts, tyfringe = zipTupleStructureAndType g ts (typeOfLambdaArg g vs) in ts, (tyfringe, vs))
             callPattern
             vss
 
@@ -642,7 +642,7 @@ let decideFormalSuggestedCP g z tys vss =
 //-------------------------------------------------------------------------
 
 let decideTransform g z v callPatterns (m, tps, vss: Val list list, retTy) =
-    let tys = List.map (typeOfLambdaArg m) vss
+    let tys = List.map (typeOfLambdaArg g) vss
 
     // NOTE: 'a in arg types may have been instanced at different tuples...
     //       commonCallPattern has to handle those cases.
@@ -656,7 +656,7 @@ let decideTransform g z v callPatterns (m, tps, vss: Val list list, retTy) =
     let callPattern = List.truncate callPattern.Length formalCallPattern
 
     // Zip with information about known args
-    let callPattern, tyfringes = zipCallPatternArgTys m g callPattern vss
+    let callPattern, tyfringes = zipCallPatternArgTys g callPattern vss
 
     // Drop trivial tail AND
     let callPattern = minimalCallPattern callPattern

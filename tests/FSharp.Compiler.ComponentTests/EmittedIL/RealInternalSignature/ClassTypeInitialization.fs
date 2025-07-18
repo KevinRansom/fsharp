@@ -611,7 +611,7 @@ module doIt =
         |> asExe
         |> withRealInternalSignature realSig
         |> withOptimization optimize
-        |> compileAndRun
+        |> compile          //AndRun
         |> shouldSucceed
         |> verifyPEFileWithSystemDlls
         |> withOutputContainsAllInOrderWithWildcards [

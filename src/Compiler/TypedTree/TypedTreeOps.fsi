@@ -49,13 +49,13 @@ val (+->): Typars -> TType -> TType
 val mkIteratedFunTy: TcGlobals -> TTypes -> TType -> TType
 
 /// Get the natural type of a single argument amongst a set of curried arguments
-val typeOfLambdaArg: range -> Val list -> TType
+val typeOfLambdaArg: TcGlobals -> Val list -> TType
 
 /// Get the type corresponding to a lambda
 val mkLambdaTy: TcGlobals -> Typars -> TTypes -> TType -> TType
 
 /// Get the curried type corresponding to a lambda
-val mkMultiLambdaTy: TcGlobals -> range -> Val list -> TType -> TType
+val mkMultiLambdaTy: TcGlobals -> Val list -> TType -> TType
 
 /// Module publication, used while compiling fslib.
 val ensureCcuHasModuleOrNamespaceAtPath: CcuThunk -> Ident list -> CompilationPath -> XmlDoc -> unit
