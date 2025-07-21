@@ -11586,7 +11586,56 @@ and TcLetBinding (cenv: cenv) isUse env containerInfo declKind tpenv (synBinds, 
         // on all other paths.
         let tpenv = HideUnscopedTypars generalizedTypars tpenv
         let valSchemes = NameMap.map (UseCombinedValReprInfo g declKind rhsExpr) prelimValSchemes2
+
+        //@@@@@@@@@@@@@@@@@@@@@@@
+        // helper to stringify a SynValInfo
+        let formatSynValInfo (SynValInfo(argGroups, retInfo)) =
+            // each group: [arg1,arg2] …
+            let grpStrs =
+                argGroups
+                |> List.map (fun grp ->
+                    let names =
+                        grp
+                        |> List.choose (fun (SynArgInfo(_, _, idOpt)) ->
+                           idOpt |> Option.map (fun id -> id.idText))
+                    sprintf "[%s]" (String.concat "," names)
+                )
+            // return‐slot name or placeholder
+            let retName =
+                match retInfo.Ident with
+                | Some id -> id.idText
+                | None    -> "(ret)"
+            sprintf "%s -> %s" (String.concat " " grpStrs) retName
+
+        // call this once, e.g. at top of your file (or in Init code)
+        let logFilePath = @"c:\temp\fsharp-valinfo.log"
+        // clear old contents
+        System.IO.File.AppendAllLines(logFilePath, [| $"{tbinfo.ToString()} {valSchemes |> Seq.length } " |])
+
+        // ────────────────────────────────────────────────────────
+        // 1) Side-effecting log pass
+        valSchemes 
+        |> NameMap.iter (fun scheme ->
+            // Destructure all 13 fields, picking out only the ones you need
+            let (ValScheme( id, _, vrOpt, _, _, _, _, _, _, _, _, _, _ )) = scheme
+
+            // rebuild SynValInfo as before
+            let synValInfo =
+                match vrOpt with
+                | Some vr ->
+                    let groups =
+                        vr.ArgInfos
+                        |> List.map (fun grp ->
+                            grp |> List.map (fun argRepr -> SynArgInfo([], false, argRepr.Name))
+                        )
+                    SynValInfo(groups, SynArgInfo([], false, None))
+                | None ->
+                    SynValInfo([], SynArgInfo([], false, None))
+            System.IO.File.AppendAllLines(logFilePath, [| sprintf "%s: %s" id.idText (formatSynValInfo synValInfo) |])
+        )
+        // ──────────────────────────────────────────────────────── 
         let values = MakeAndPublishVals cenv env (altActualParent, false, declKind, ValNotInRecScope, valSchemes, attrs, xmlDoc, literalValue)
+
         let checkedPat = tcPatPhase2 (TcPatPhase2Input (values, true))
         let prelimRecValues = NameMap.map fst values
 

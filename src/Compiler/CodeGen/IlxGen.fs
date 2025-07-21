@@ -50,6 +50,14 @@ let IlxGenStackGuardDepth = StackGuard.GetDepthOption "IlxGen"
 let getEmptyStackGuard () =
     StackGuard(IlxGenStackGuardDepth, "IlxAssemblyGenerator")
 
+let rec safeWriteAllLines (path: string) (content: string array) (attempts: int) =
+    try
+        File.AppendAllLines(path, content)
+    with
+    | :? IOException when attempts > 0 ->
+        Thread.Sleep(100)
+        safeWriteAllLines path content (attempts - 1)
+
 let IsNonErasedTypar (tp: Typar) = not tp.IsErased
 
 let DropErasedTypars (tps: Typar list) = tps |> List.filter IsNonErasedTypar
@@ -540,10 +548,7 @@ type TypeReprEnv
         | Some (idx, _) ->
             ILType.TypeVar (uint16 idx)
         | None ->
-            System.IO.File.AppendAllLines(
-                @"C:\temp\TypeVarUnsolved.txt",
-                [ sprintf "Unresolved tyvar '%s' at %O" tp.DisplayName m ])
-
+            safeWriteAllLines @"C:\temp\TypeVarUnsolved.txt" [| sprintf "Unresolved tyvar '%s' at %O" tp.DisplayName m |] 5
             ilg.typ_Object
 
     //member _.Item (tp: Typar, m: Range) : ILType =
@@ -1429,7 +1434,16 @@ let IsValRefIsDllImport g (vref: ValRef) =
 let GetMethodSpecForMemberVal cenv (memberInfo: ValMemberInfo) (vref: ValRef) =
     let g = cenv.g
     let m = vref.Range
-    let numEnclosingTypars = CountEnclosingTyparsOfActualParentOfVal vref.Deref
+    // If this is actually a member (or extension) on a generic type,
+    // inherit its type-parameter count.  Otherwise fall back to the module logic.
+    let numEnclosingTypars =
+        match vref.MemberInfo with
+        | Some _ ->
+            // DeclaringEntity is the TyconRef of the parent type
+            let parentTcref = vref.DeclaringEntity
+            parentTcref.TyparsNoRange.Length
+        | None ->
+            CountEnclosingTyparsOfActualParentOfVal vref.Deref
 
     let tps, witnessInfos, curriedArgInfos, returnTy, retInfo =
         assert vref.ValReprInfo.IsSome
@@ -1592,7 +1606,13 @@ let ComputeStorageForFSharpMember cenv valReprInfo memberInfo (vref: ValRef) m =
 let ComputeStorageForFSharpFunctionOrFSharpExtensionMember (cenv: cenv) cloc valReprInfo (vref: ValRef) m =
     let g = cenv.g
     let nm = vref.CompiledName g.CompilerGlobalState
-    let numEnclosingTypars = CountEnclosingTyparsOfActualParentOfVal vref.Deref
+    let numEnclosingTypars =
+        match vref.MemberInfo with
+        | Some _ ->
+            let parentTcref = vref.DeclaringEntity
+            parentTcref.TyparsNoRange.Length
+        | None ->
+            CountEnclosingTyparsOfActualParentOfVal vref.Deref
 
     let tps, witnessInfos, curriedArgInfos, returnTy, retInfo =
         GetValReprTypeInCompiledForm g valReprInfo numEnclosingTypars vref.Type m
@@ -7183,9 +7203,7 @@ and GetIlxClosureInfo cenv m boxity isLocalTypeFunc canUseStaticField thisVars e
 
     for tp in cloFreeTyvars do
         if not (eenvinner.tyenv.AsUserProvidedTypars() |> Seq.exists (fun tp' -> tp'.Stamp = tp.Stamp)) then
-            System.IO.File.AppendAllLines(
-                @"C:\temp\TypeVarUnsolved.txt",
-                [ sprintf "Missing type parameter before GenGenericArgs: '%s' at %O" tp.DisplayName m ])
+            safeWriteAllLines @"C:\temp\TypeVarUnsolved.txt" [| sprintf "Missing type parameter before GenGenericArgs: '%s' at %O" tp.DisplayName m |] 10
 
     let ilCloGenericActuals = GenGenericArgs m eenvouter.tyenv cloFreeTyvars
 

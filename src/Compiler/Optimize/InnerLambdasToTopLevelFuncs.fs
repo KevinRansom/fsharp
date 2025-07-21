@@ -10,6 +10,7 @@ open FSharp.Compiler.CompilerGlobalState
 open FSharp.Compiler.Detuple.GlobalUsageAnalysis
 open FSharp.Compiler.DiagnosticsLogger
 open FSharp.Compiler.Syntax
+open FSharp.Compiler.CheckExpressions    // for MakeMemberDataAndMangledNameForMemberVal
 open FSharp.Compiler.Text
 open FSharp.Compiler.Text.Layout
 open FSharp.Compiler.Text.LayoutRender
@@ -83,11 +84,44 @@ let isDelayedRepr (f: Val) e =
     let _tps, vss, _b, _rty = stripTopLambda (e, f.Type)
     not(List.isEmpty vss)
 
+/// Create a fresh compiler-generated Val representing a closure-host method.
+/// This variant wires up the ValMemberInfo immediately, ensuring that codegen
+/// sees it as a static method with the correct parent, flags, and arity.
+///
+/// - `isCompGen`  : Whether the Val is compiler-generated
+/// - `m`          : Source range for location tracking
+/// - `name`       : Logical identifier
+/// - `ty`         : Full lambda type (including lifted environment + args)
+/// - `arity`      : Argument grouping info (ValReprInfo)
+/// - `hostTycon`  : TyconRef of the closure-host type (DeclaringEntity)
+/// - `paramNames` : Name hints for parameters, grouped by currying phase
+/// - `retName`    : Optional return identifier
+let mkClosureMethodVal emitMethod compGen m name ty valReprInfo parentRef: Val =
+    let specialRepr: ValMemberInfo option =
 
-// REVIEW: these should just be replaced by direct calls to mkLocal, mkCompGenLocal etc.
-// REVIEW: However these set an arity whereas the others don't
-let mkLocalNameTypeArity compgen m name ty valReprInfo =
-    Construct.NewVal(name, m, None, ty, Immutable, compgen, valReprInfo, taccessPublic, ValNotInRecScope, None, NormalVal, [], ValInline.Optional, XmlDoc.Empty, false, false, false, false, false, false, None, ParentNone)
+        let getHostTycon parentRef =
+            match parentRef with
+            | Parent tcref -> tcref
+            | ParentNone -> failwithf "TLR: lifted value %s has no DeclaringEntity" name
+
+        if emitMethod then
+            Some {
+                ApparentEnclosingEntity             = getHostTycon parentRef
+                ImplementedSlotSigs                 = []
+                IsImplemented                       = false
+                MemberFlags                         = {
+                  IsInstance                         = false
+                  IsDispatchSlot                     = false
+                  IsOverrideOrExplicitImpl           = false
+                  IsFinal                            = true
+                  GetterOrSetterIsCompilerGenerated  = false
+                  MemberKind                         = SynMemberKind.Member
+                }
+              }
+        else
+            None
+
+    Construct.NewVal(name, m, None, ty, Immutable, compGen, valReprInfo, taccessPublic, ValNotInRecScope, specialRepr, NormalVal, [], ValInline.Optional, XmlDoc.Empty, false, false, false, false, false, false, None, parentRef)
 
 //-------------------------------------------------------------------------
 // definitions: TLR, arity, arity-met, arity-short
@@ -216,29 +250,29 @@ module Pass1_DetermineTLRAndArities =
         Zmap.iter dump arityM
 
     let DetermineTLRAndArities g expr =
-       let xinfo = GetUsageInfoOfImplFile g expr
-       let fArities = Zmap.chooseL (SelectTLRVals g xinfo) xinfo.Defns
-       let fArities = List.filter (fst >> IsValueRecursionFree xinfo) fArities
-       // Do not TLR v if it is bound under a shouldinline defn
-       // There is simply no point - the original value will be duplicated and TLR'd anyway
-       let rejectS = GetValsBoundUnderShouldInline xinfo
-       let fArities = List.filter (fun (v, _) -> not (Zset.contains v rejectS)) fArities
-       (*-*)
-       let tlrS = Zset.ofList valOrder (List.map fst fArities)
-       let topValS = xinfo.TopLevelBindings                                 (* genuinely top level *)
-       let topValS = Zset.filter (IsMandatoryNonTopLevel g >> not) topValS  (* restrict *)
+        let xinfo = GetUsageInfoOfImplFile g expr
+        let fArities = Zmap.chooseL (SelectTLRVals g xinfo) xinfo.Defns
+        let fArities = List.filter (fst >> IsValueRecursionFree xinfo) fArities
+        // Do not TLR v if it is bound under a shouldinline defn
+        // There is simply no point - the original value will be duplicated and TLR'd anyway
+        let rejectS = GetValsBoundUnderShouldInline xinfo
+        let fArities = List.filter (fun (v, _) -> not (Zset.contains v rejectS)) fArities
+        (*-*)
+        let tlrS = Zset.ofList valOrder (List.map fst fArities)
+        let topValS = xinfo.TopLevelBindings                                 (* genuinely top level *)
+        let topValS = Zset.filter (IsMandatoryNonTopLevel g >> not) topValS  (* restrict *)
 #if DEBUG
-       (* REPORT MISSED CASES *)
-       if verboseTLR then
-           let missed = Zset.diff  xinfo.TopLevelBindings tlrS
-           missed |> Zset.iter (fun v -> dprintf "TopLevel but not TLR = %s\n" v.LogicalName)
-       (* REPORT OVER *)
+        (* REPORT MISSED CASES *)
+        if verboseTLR then
+            let missed = Zset.diff  xinfo.TopLevelBindings tlrS
+            missed |> Zset.iter (fun v -> dprintf "TopLevel but not TLR = %s\n" v.LogicalName)
+        (* REPORT OVER *)
 #endif
-       let arityM = Zmap.ofList valOrder fArities
+        let arityM = Zmap.ofList valOrder fArities
 #if DEBUG
-       if verboseTLR then DumpArity arityM
+        if verboseTLR then DumpArity arityM
 #endif
-       tlrS, topValS, arityM
+        tlrS, topValS, arityM
 
 (* NOTES:
    For constants,
@@ -612,6 +646,23 @@ module Pass2_DetermineReqdItems =
 #endif
 
     let DetermineReqdItems (tlrS, arityM) expr =
+
+        //let fetchBinds tlrS _arityM =
+        //    // returns a function expecting the actual ‘binds’ list
+        //    fun (binds: TypedTree.Expr list) ->
+        //        // fold over each binding expression
+        //        binds
+        //        |> List.fold (fun tlrS expr ->
+        //            match expr with
+        //            //| TBind(f, synValInfo, letSeqPtOpt) ->
+        //            //    // ? this is where you get `synValInfo`
+        //            //    Zset.add f synValInfo tlrS
+        //            | _a -> tlrS
+        //        ) tlrS
+
+        //let processBinds = fetchBinds tlrS arityM
+        //let resultState = processBinds exprs
+
         if verboseTLR then dprintf "DetermineReqdItems------\n"
         let folder = {ExprFolder0 with exprIntercept = ExprEnvIntercept (tlrS, arityM)}
         let z = state0
@@ -744,6 +795,7 @@ let FlatEnvPacks g fclassM topValS declist (reqdItemsMap: Zmap<BindingGroupShari
        //        temp
 
        let vals = vals |> List.filter (fun v -> not (isByrefLikeTy g v.Range v.Type))
+
        // Remove values which have been labelled TLR, no need to close over these
        let vals = vals |> List.filter (Zset.memberOf topValS >> not)
 
@@ -816,62 +868,74 @@ let ChooseReqdItemPackings g fclassM topValS  declist reqdItemsMap =
 // step3: CreateNewValuesForTLR
 //-------------------------------------------------------------------------
 
-let CreateNewValuesForTLR g tlrS arityM fclassM envPackM =
+/// Lift each inner lambda `f` in `tlrS` into a fresh `fHat` Val with
+/// attached MemberInfo, returning the map `f -> fHat`.
+let CreateNewValuesForTLR
+    (g        : TcGlobals)
+    (tlrS     : Zset<Val>)
+    (arityM   : Zmap<Val,int>)
+    (fclassM  : Zmap<Val,BindingGroupSharingSameReqdItems>)
+    (envPackM : Zmap<BindingGroupSharingSameReqdItems,PackedReqdItems>)
+  : Zmap<Val,Val> =
 
-    let createFHat (f: Val) =
-        let wf = Zmap.force f arityM ("createFHat - wf", (valL >> showL))
-        let fc = Zmap.force f fclassM ("createFHat - fc", nameOfVal)
-        let envp = Zmap.force fc envPackM ("CreateNewValuesForTLR - envp", string)
-        let name = f.LogicalName (* + "_TLR_" + string wf *)
-        let m = f.Range
-        let tps, tau = f.GeneralizedType
-        let argTys, retTy = stripFunTy g tau
+  let createFHat (f: Val) : Val =
+    // 1) lookup workload, class key & env-pack
+    let wf   = Zmap.force f arityM    ("CreateNewValuesForTLR - wf",      (valL >> showL))
+    let fc   = Zmap.force f fclassM   ("CreateNewValuesForTLR - fclass", nameOfVal)
+    let envp = Zmap.force fc envPackM ("CreateNewValuesForTLR - envp",   string)
 
-        // under realsig- we *flatten* them, under realsig+ we keep them ambient
-        let declaredMethodTpars =
-            if g.realsig then
-                // inherit parent <T,U> from the enclosing type
-                tps
-            else
-                // non-realsig must re-declare ambient typars
-                envp.ep_etps @ tps
+    // 2) original name & range
+    let baseName, m = f.LogicalName, f.Range
 
-        let fHatTy =
-            let newArgTys = List.map typeOfVal envp.ep_aenvs @ argTys
-            mkLambdaTy g declaredMethodTpars newArgTys retTy
+    // 3) build the lifted-lambda type
+    let tps, tau = f.GeneralizedType
+    let argTys, retTy = stripFunTy g tau
+    let declaredMethodTpars =
+        if g.realsig then tps else envp.ep_etps @ tps
+    let newArgTys =
+        (List.map typeOfVal envp.ep_aenvs) @ argTys
+    let fHatTy =
+        mkLambdaTy g declaredMethodTpars newArgTys retTy
 
-        // build a ValReprInfo with exactly one group of (env + wf) unnamed args
-        let totalValParams = envp.ep_aenvs.Length + wf
+    // 4) one-group ValReprInfo of unnamed args
+    let totalParams = envp.ep_aenvs.Length + wf
 
-        // now replicate that single ArgReprInfo totalValParams times,
-        // then wrap it in a one?element list to get exactly one group
-        let templateGroup = ValReprInfo.unnamedTopArg
-        let singleGroup =
-            templateGroup
-            |> List.replicate totalValParams
-            |> List.concat
+    // one group of that many “unnamed” ArgReprInfos
+    let singleGroup: ArgReprInfo list = List.replicate totalParams ValReprInfo.unnamedTopArg1
 
-        let argGroups : ArgReprInfo list list = [ singleGroup ]
+    // build the ValReprInfo correctly:
+    let fHatArity =
+        ValReprInfo(
+          ValReprInfo.InferTyparInfo declaredMethodTpars,  // typars
+          [ singleGroup ],                                 // args groups
+          ValReprInfo.unnamedRetVal                        // single return ArgReprInfo
+        )
 
-        let fHatArity =
-            ValReprInfo(
-              ValReprInfo.InferTyparInfo declaredMethodTpars,
-              argGroups,
-              ValReprInfo.unnamedRetVal)
+    // 5) fresh name for fHat
+    assert (g.CompilerGlobalState.IsSome)
+    let fHatName =
+        g.CompilerGlobalState.Value.NiceNameGenerator.FreshCompilerGeneratedName(baseName, m)
 
-        let fHatName =
-            // Ensure that we have an g.CompilerGlobalState
-            assert(g.CompilerGlobalState |> Option.isSome)
-            g.CompilerGlobalState.Value.NiceNameGenerator.FreshCompilerGeneratedName(name, m)
+    // 6) derive host TyconRef from the original f
+    let hostTycon =
+        match (f.ApparentEnclosingEntity) with
+        | Parent ty when g.realsig = true -> Parent ty
+        | _ -> ParentNone
 
-        let fHat = mkLocalNameTypeArity f.IsCompilerGenerated m fHatName fHatTy (Some fHatArity)
+    mkClosureMethodVal
+      g.realsig
+      f.IsCompilerGenerated
+      m
+      fHatName
+      fHatTy
+      (Some fHatArity)
+      hostTycon
 
-        fHat
-
-    let fs = Zset.elements tlrS
-    let ffHats = List.map (fun f -> f, createFHat f) fs
-    let fHatM = Zmap.ofList valOrder ffHats
-    fHatM
+  // process all f’s and build the mapping f -> fHat
+  tlrS
+  |> Zset.elements
+  |> List.map    (fun f -> f, createFHat f)
+  |> Zmap.ofList valOrder
 
 //-------------------------------------------------------------------------
 // pass4: rewrite - penv
@@ -1021,10 +1085,20 @@ module Pass4_RewriteAssembly =
                     else ambientTpars @ localTpars
 
                 // DEBUG: dump the arity we’re actually applying
-                do
-                    let tyArgs  = List.length callTypars
-                    let valArgs = List.length (aenvExprs @ vsExprs)
-                    System.IO.File.AppendAllLines(@"c:\temp\results", [|sprintf ">> fRebinding calling %s at %s; typeArgs=%d, valArgs=%d" fOrig.LogicalName (m.ToString()) tyArgs valArgs|])
+                // --- LOGGING HOOK ----------------------------------------
+                System.IO.File.AppendAllText(
+                  @"C:\temp\ClosureTrace.log",
+                  sprintf
+                    "Rebinding closure: %s @ %O\  
+                     \tambientTpars = [%s]\  
+                     \tlocalTpars   = [%s]\  
+                     \tmethodTpars  = [%s]\n"
+                    fOrig.LogicalName
+                    fOrig.Range
+                    (ambientTpars |> List.map (fun tp -> tp.DisplayName) |> String.concat ";")
+                    (localTpars   |> List.map (fun tp -> tp.DisplayName) |> String.concat ";")
+                    (methodEnvTpars |> List.map (fun tp -> tp.DisplayName) |> String.concat ";"))
+                // ---------------------------------------------------------
 
                 mkMultiLambdaBind g fOrig letSeqPtOpt m methodEnvTpars vss
                     ( mkApps penv.g
@@ -1063,13 +1137,20 @@ module Pass4_RewriteAssembly =
                     if penv.g.realsig then ambientTpars @ localTpars
                     else ambientTpars @ localTpars
 
-                // DEBUG: verify fHat’s lambda binders vs. its arg groups
-                do
-                    let tyArgs     = List.length methodEnvTpars
-                    let groups     = List.length fHat_args
-                    let valArgs    = fHat_args |> List.sumBy List.length
-                    System.IO.File.AppendAllLines(
-                      @"c:\temp\results", [|sprintf ">> fHatNewBinding %s at %s; tyArgs=%d, groups=%d, valArgs=%d" f.LogicalName (m.ToString()) tyArgs groups valArgs|])
+                // --- ANOTHER LOGGING HOOK -------------------------------
+                System.IO.File.AppendAllText(
+                  @"C:\temp\ClosureTrace.log",
+                  sprintf
+                    "fHat emission: %s @ %O\n\
+                     \tambientTpars = [%s]\n\
+                     \tlocalTpars   = [%s]\n\
+                     \tmethodTpars  = [%s]\n"
+                    fHat.LogicalName
+                    fHat.Range
+                    (ambientTpars |> List.map (fun tp -> tp.DisplayName) |> String.concat ";")
+                    (localTpars   |> List.map (fun tp -> tp.DisplayName) |> String.concat ";")
+                    (methodEnvTpars |> List.map (fun tp -> tp.DisplayName) |> String.concat ";"))
+                // ---------------------------------------------------------
 
                 let fHatBind =
                     mkMultiLambdaBind g fHat letSeqPtOpt m methodEnvTpars fHat_args
