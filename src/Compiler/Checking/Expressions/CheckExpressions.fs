@@ -288,13 +288,6 @@ let AddDeclaredTypars check typars env =
 
 let emptyUnscopedTyparEnv: UnscopedTyparEnv = UnscopedTyparEnv Map.empty
 
-let AddUnscopedTypar name typar (UnscopedTyparEnv tab) = UnscopedTyparEnv (Map.add name typar tab)
-
-let TryFindUnscopedTypar name (UnscopedTyparEnv tab) = Map.tryFind name tab
-
-let HideUnscopedTypars typars (UnscopedTyparEnv tab) =
-    UnscopedTyparEnv (List.fold (fun acc (tp: Typar) -> Map.remove tp.Name acc) tab typars)
-
 type OverridesOK =
     | OverridesOK
     | WarnOnOverrides
@@ -4380,7 +4373,7 @@ and TcValSpec (cenv: cenv) env declKind newOk containerInfo memFlagsOpt thisTyOp
 /// If kindOpt=Some kind, then this is the kind we're expecting (we're in *analysis* mode)
 /// If kindOpt=None, we need to determine the kind (we're in *synthesis* mode)
 ///
-and TcTypeOrMeasureParameter kindOpt cenv (env: TcEnv) newOk tpenv (SynTypar(id, _, _) as tp) =
+and TcTypeOrMeasureParameter kindOpt cenv (env: TcEnv) newOk (tpenv: UnscopedTyparEnv) (SynTypar(id, _, _) as tp) =
     let checkRes (res: Typar) =
         match kindOpt, res.Kind with
         | Some TyparKind.Measure, TyparKind.Type -> error (Error(FSComp.SR.tcExpectedUnitOfMeasureMarkWithAttribute(), id.idRange)); res, tpenv
@@ -4397,7 +4390,7 @@ and TcTypeOrMeasureParameter kindOpt cenv (env: TcEnv) newOk tpenv (SynTypar(id,
     | _ ->
 
     // Check if it is already in the implicitly scoped environment
-    match TryFindUnscopedTypar key tpenv with
+    match tpenv.tryFindTypar(key) with
     | Some res -> checkRes res
     | None ->
 
@@ -4407,11 +4400,7 @@ and TcTypeOrMeasureParameter kindOpt cenv (env: TcEnv) newOk tpenv (SynTypar(id,
             let suggestTypeParameters (addToBuffer: string -> unit) =
                 for p in env.eNameResEnv.eTypars do
                     addToBuffer ("'" + p.Key)
-
-                match tpenv with
-                | UnscopedTyparEnv elements ->
-                    for p in elements do
-                        addToBuffer ("'" + p.Key)
+                tpenv.asMap() |> Map.iter (fun k _ -> addToBuffer ("'" + k)) 
 
             let reportedId = Ident("'" + id.idText, id.idRange)
             error (UndefinedName(0, FSComp.SR.undefinedNameTypeParameter, reportedId, suggestTypeParameters))
@@ -4424,7 +4413,7 @@ and TcTypeOrMeasureParameter kindOpt cenv (env: TcEnv) newOk tpenv (SynTypar(id,
 
         CallNameResolutionSink cenv.tcSink (id.idRange, env.NameEnv, item, emptyTyparInst, ItemOccurrence.UseInType, env.AccessRights)
 
-        tpR, AddUnscopedTypar key tpR tpenv
+        tpR, tpenv.addTypar(key, tpR)
 
 and TcTypar (cenv: cenv) env newOk tpenv tp : Typar * UnscopedTyparEnv =
     TcTypeOrMeasureParameter (Some TyparKind.Type) cenv env newOk tpenv tp
@@ -11584,58 +11573,9 @@ and TcLetBinding (cenv: cenv) isUse env containerInfo declKind tpenv (synBinds, 
 
         // REVIEW: this scopes generalized type variables. Ensure this is handled properly
         // on all other paths.
-        let tpenv = HideUnscopedTypars generalizedTypars tpenv
+        let tpenv = tpenv.hideTypars(generalizedTypars)
         let valSchemes = NameMap.map (UseCombinedValReprInfo g declKind rhsExpr) prelimValSchemes2
-
-        //@@@@@@@@@@@@@@@@@@@@@@@
-        // helper to stringify a SynValInfo
-        let formatSynValInfo (SynValInfo(argGroups, retInfo)) =
-            // each group: [arg1,arg2] …
-            let grpStrs =
-                argGroups
-                |> List.map (fun grp ->
-                    let names =
-                        grp
-                        |> List.choose (fun (SynArgInfo(_, _, idOpt)) ->
-                           idOpt |> Option.map (fun id -> id.idText))
-                    sprintf "[%s]" (String.concat "," names)
-                )
-            // return‐slot name or placeholder
-            let retName =
-                match retInfo.Ident with
-                | Some id -> id.idText
-                | None    -> "(ret)"
-            sprintf "%s -> %s" (String.concat " " grpStrs) retName
-
-        // call this once, e.g. at top of your file (or in Init code)
-        let logFilePath = @"c:\temp\fsharp-valinfo.log"
-        // clear old contents
-        System.IO.File.AppendAllLines(logFilePath, [| $"{tbinfo.ToString()} {valSchemes |> Seq.length } " |])
-
-        // ────────────────────────────────────────────────────────
-        // 1) Side-effecting log pass
-        valSchemes 
-        |> NameMap.iter (fun scheme ->
-            // Destructure all 13 fields, picking out only the ones you need
-            let (ValScheme( id, _, vrOpt, _, _, _, _, _, _, _, _, _, _ )) = scheme
-
-            // rebuild SynValInfo as before
-            let synValInfo =
-                match vrOpt with
-                | Some vr ->
-                    let groups =
-                        vr.ArgInfos
-                        |> List.map (fun grp ->
-                            grp |> List.map (fun argRepr -> SynArgInfo([], false, argRepr.Name))
-                        )
-                    SynValInfo(groups, SynArgInfo([], false, None))
-                | None ->
-                    SynValInfo([], SynArgInfo([], false, None))
-            System.IO.File.AppendAllLines(logFilePath, [| sprintf "%s: %s" id.idText (formatSynValInfo synValInfo) |])
-        )
-        // ──────────────────────────────────────────────────────── 
         let values = MakeAndPublishVals cenv env (altActualParent, false, declKind, ValNotInRecScope, valSchemes, attrs, xmlDoc, literalValue)
-
         let checkedPat = tcPatPhase2 (TcPatPhase2Input (values, true))
         let prelimRecValues = NameMap.map fst values
 
@@ -12276,7 +12216,7 @@ and AnalyzeAndMakeAndPublishRecursiveValue
         isGeneratedEventVal
         (cenv: cenv)
         (env: TcEnv)
-        (tpenv, recBindIdx)
+        (tpenv: UnscopedTyparEnv, recBindIdx)
         (NormalizedRecBindingDefn(containerInfo, newslotsOK, declKind, binding)) =
 
     let g = cenv.g
@@ -12323,6 +12263,12 @@ and AnalyzeAndMakeAndPublishRecursiveValue
 
     // NOTE: The type scheme here is normally not 'complete'!!!! The type is more or less just a type variable at this point.
     // NOTE: top arity, type and typars get fixed-up after inference
+    let altActualParent =
+        // Use the tpenv Parent to get the actual parent when it is an ExpressionBinding and also has no altParent set
+        match g.realsig, declKind, altActualParent with
+        | true, ExpressionBinding, ParentNone -> tpenv.asParent()
+        | _ -> altActualParent
+
     let prelimTyscheme = GeneralizedType(enclosingDeclaredTypars@declaredTypars, ty)
     let prelimValReprInfo = TranslateSynValInfo cenv mBinding (TcAttributes cenv envinner) valSynInfo
     let valReprInfo, valReprInfoForDisplay = UseSyntacticValReprInfo declKind prelimTyscheme prelimValReprInfo
@@ -12630,7 +12576,7 @@ and TcIncrementalLetRecGeneralization cenv scopem
 
                 // Generalize the bindings.
                 let newGeneralizedRecBinds = (generalizedTyparsL, newGeneralizableBindings) ||> List.map2 (TcLetrecGeneralizeBinding cenv denv )
-                let tpenv = HideUnscopedTypars (List.concat generalizedTyparsL) tpenv
+                let tpenv = tpenv.hideTypars(List.concat generalizedTyparsL)
                 newGeneralizedRecBinds, tpenv
 
 
@@ -12969,7 +12915,7 @@ let TcAndPublishValSpec (cenv: cenv, env, containerInfo: ContainerInfo, declKind
 
         let valscheme2 = GeneralizeVal cenv denv enclosingDeclaredTypars generalizedTypars valscheme1
 
-        let tpenv = HideUnscopedTypars generalizedTypars tpenv
+        let tpenv = tpenv.hideTypars(generalizedTypars)
 
         let valscheme = BuildValScheme declKind (Some prelimValReprInfo) valscheme2
 

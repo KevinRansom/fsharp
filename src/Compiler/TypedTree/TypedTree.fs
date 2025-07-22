@@ -3113,8 +3113,8 @@ type Val =
         match x.TryDeclaringEntity with 
         | Parent eref -> 
             match eref.PublicPath with 
-            | None -> None
-            | Some p -> Some(ValPubPath(p, x.GetLinkageFullKey()))
+            | Some p when x.IsCompiledAsTopLevel -> Some(ValPubPath(p, x.GetLinkageFullKey()))
+            | _ -> None
         | ParentNone -> 
             None
 
@@ -6310,7 +6310,7 @@ type Construct() =
 
         let flags = ValFlags(recValInfo, baseOrThis, isCompGen, inlineInfo, isMutable, isModuleOrMemberBinding, isExtensionMember, isIncrClassSpecialMember, isTyFunc, allowTypeInst, isGeneratedEventVal)
 
-        Val.New {
+        let result = Val.New {
             val_stamp = stamp
             val_logical_name = logicalName
             val_range = m
@@ -6318,6 +6318,7 @@ type Construct() =
             val_type = ty
             val_opt_data = optData
         }
+        result
 
     /// Create the new contents of an overall assembly
     static member NewCcuContents sref m nm mty =

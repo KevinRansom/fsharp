@@ -101,12 +101,13 @@ let mkClosureMethodVal emitMethod compGen m name ty valReprInfo parentRef: Val =
 
         let getHostTycon parentRef =
             match parentRef with
-            | Parent tcref -> tcref
-            | ParentNone -> failwithf "TLR: lifted value %s has no DeclaringEntity" name
+            | Parent tcref -> Some tcref
+            | ParentNone -> None
 
-        if emitMethod then
+        match emitMethod, getHostTycon parentRef with
+        | true, Some apparentEnclosingEntity ->
             Some {
-                ApparentEnclosingEntity             = getHostTycon parentRef
+                ApparentEnclosingEntity             = apparentEnclosingEntity
                 ImplementedSlotSigs                 = []
                 IsImplemented                       = false
                 MemberFlags                         = {
@@ -118,7 +119,7 @@ let mkClosureMethodVal emitMethod compGen m name ty valReprInfo parentRef: Val =
                   MemberKind                         = SynMemberKind.Member
                 }
               }
-        else
+        | _ ->
             None
 
     Construct.NewVal(name, m, None, ty, Immutable, compGen, valReprInfo, taccessPublic, ValNotInRecScope, specialRepr, NormalVal, [], ValInline.Optional, XmlDoc.Empty, false, false, false, false, false, false, None, parentRef)

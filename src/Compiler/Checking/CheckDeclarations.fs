@@ -1317,7 +1317,8 @@ module MutRecBindingChecking =
                 let envForTycon = { envForTycon with eCtorInfo = Some (CtorInfo.InitialImplicit()) }
 
                 let reqdThisValTyOpt = Some thisTy
-                
+                let tpenv = tpenv.withParent(Parent tcref)
+
                 // Loop through the definition elements in a type...
                 // State: 
                 //      envInstance: the environment in scope in instance members
