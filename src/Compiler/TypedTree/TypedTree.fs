@@ -6318,6 +6318,12 @@ type Construct() =
             val_type = ty
             val_opt_data = optData
         }
+
+        if arity.IsSome then
+            System.IO.File.AppendAllText(@"C:\temp\ValReprOrigins.txt",
+              sprintf "MoveNext ValReprInfo: NumCurriedArgs=%d | ArgInfos=%A\n"
+                      arity.Value.NumCurriedArgs arity.Value.ArgInfos)
+
         result
 
     /// Create the new contents of an overall assembly

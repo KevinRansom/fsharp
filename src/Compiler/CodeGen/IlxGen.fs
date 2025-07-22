@@ -7227,6 +7227,14 @@ and GetIlxClosureInfo cenv m boxity isLocalTypeFunc canUseStaticField thisVars e
             cloWitnessInfos = cloWitnessInfos
         }
 
+    System.IO.File.AppendAllLines(
+        @"C:\temp\ClosureFinalAudit.txt",
+        [ sprintf "Closure: %s | FreeVars=%d | Arity=%A | StaticField=%b | ReturnType=%s"
+                    cloinfo.cloName
+                    cloinfo.ilCloAllFreeVars.Length
+                    cloinfo.cloArityInfo
+                    cloinfo.cloSpec.UseStaticField
+                    (cloinfo.ilCloFormalReturnTy.ToString()) ])
     cloinfo, body, eenvinner
 
 /// Generate a new delegate construction including a closure class if necessary. This is a lot like generating function closures

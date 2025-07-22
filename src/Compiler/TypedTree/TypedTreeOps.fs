@@ -1839,6 +1839,7 @@ type TraitWitnessInfos = TraitWitnessInfo list
 
 // A 'tau' type is one with its type parameters stripped off 
 let GetTopTauTypeInFSharpForm g (curriedArgInfos: ArgReprInfo list list) tau m =
+    if (string (m.ToString())).Contains("takeInner") then System.Diagnostics.Debugger.Break()
     let nArgInfos = curriedArgInfos.Length
     let argTys, retTy = stripFunTyN g nArgInfos tau
 
@@ -1855,8 +1856,11 @@ let GetTopTauTypeInFSharpForm g (curriedArgInfos: ArgReprInfo list list) tau m =
                 [ (argTy, argInfo) ]
 
             | _ ->
-                // TODO [TLP-127] @@@@@ remove stub when tuple shapes align
-                let elems = destRefTupleTy g argTy
+                let elems =
+                    if isAnyTupleTy g argTy then
+                        destRefTupleTy g argTy
+                    else
+                        [argTy]
                 let zippedArgs =
                     try
                         List.zip elems argInfos
