@@ -1967,6 +1967,10 @@ Actual:
         let withOutputContainsAllInOrder (substrings: string list) (result: CompilationResult) : CompilationResult =
             checkOutputInOrder "STDERR/STDOUT" substrings (fun o -> o.StdOut + "\n" + o.StdErr) result
 
+        let withOutputMatchesBaseline baseline (result: CompilationResult) : CompilationResult =
+            let substrings = File.ReadAllLines(baseline) |> Array.toList
+            checkOutputInOrder "STDERR/STDOUT" substrings (fun o -> o.StdOut + "\n" + o.StdErr) result
+
         let withStdOutContains (substring: string) (result: CompilationResult) : CompilationResult =
             checkOutputInOrder "STDOUT" [substring] (fun o -> o.StdOut)  result
 
@@ -1986,6 +1990,10 @@ Actual:
             checkOutputInOrderCore MatchStyle.RegexPatterns category substrings selector result
 
         let withOutputContainsAllInOrderWithWildcards (substrings: string list) (result: CompilationResult) : CompilationResult =
+            checkOutputInOrderWithWildcards "STDERR/STDOUT" substrings (fun o -> o.StdOut + "\n" + o.StdErr) result
+
+        let withOutputMatchesBaselineWithWildcards  baseline (result: CompilationResult) : CompilationResult =
+            let substrings = File.ReadAllLines(baseline) |> Array.toList
             checkOutputInOrderWithWildcards "STDERR/STDOUT" substrings (fun o -> o.StdOut + "\n" + o.StdErr) result
 
         let withStdOutContainsWithWildcards (substring: string) (result: CompilationResult) : CompilationResult =
