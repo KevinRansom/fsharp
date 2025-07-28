@@ -71,6 +71,13 @@ module FSharp.Core.UnitTests.AssemblyValidation
 
     [<Fact>]
     let ilverifyCleanFSharpCore () : CompilationResult =
+        let platform =
+            #if NETCOREAPP
+                    "netstandard2.1"
+            #else
+                    "netstandard2.0"
+            #endif
+
         let fsharpCoreAssemblyLocation = Path.Combine(System.IO.Path.GetDirectoryName(typeof<unit>.Assembly.Location), "ilverify", platform, "FSharp.Core.dll")
         let compilationResult =
             let compilationResult = dummySuccessResult fsharpCoreAssemblyLocation CompileOutput.Library
@@ -84,8 +91,8 @@ module FSharp.Core.UnitTests.AssemblyValidation
 
         compilationResult
         |> shouldSucceed
-//      |> withOutputMatchesBaselineWithWildcards (Path.Combine(__SOURCE_DIRECTORY__, $"FSharp.Core.ILVerify.bsl"))
-        |> withOutputContainsAllInOrderWithWildcards [
+        |> withOutputMatchesBaselineWithWildcards (Path.Combine(__SOURCE_DIRECTORY__, $"FSharp.Core.ILVerify.bsl"))
+//        |> withOutputContainsAllInOrderWithWildcards [
 //          "37 Error(s) Verifying *FSharp.Core.dll"
-            "All Classes and Methods in*FSharp.Core.dll Verified."
-        ]
+//            "All Classes and Methods in*FSharp.Core.dll Verified."
+//        ]
