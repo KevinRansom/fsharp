@@ -41,15 +41,15 @@ module FSharp.Core.UnitTests.AssemblyValidation
 //
     let platform =
 #if NETCOREAPP
-        "netstandard21"
+        "netstandard2.1"
 #else
-        "netstandard20"
+        "netstandard2.0"
 #endif
     let flavor =
 #if DEBUG
-        "debug"
+        "Debug"
 #else
-        "release"
+        "Release"
 #endif
 
     // This relies on a set of baselines to update the baseline set an environment variable before running the tests, then on failure the baselines will be updated
@@ -68,7 +68,6 @@ module FSharp.Core.UnitTests.AssemblyValidation
         let outFileName = $"FSharp.Core.SurfaceArea.{platform}.{flavor}.out"
         verify assembly baseline outFileName
 
-
     [<Fact>]
     let ilverifyCleanFSharpCore () : CompilationResult =
         let platform =
@@ -78,7 +77,7 @@ module FSharp.Core.UnitTests.AssemblyValidation
                     "netstandard2.0"
             #endif
 
-        let fsharpCoreAssemblyLocation = Path.Combine(System.IO.Path.GetDirectoryName(typeof<unit>.Assembly.Location), "ilverify", platform, "FSharp.Core.dll")
+        let fsharpCoreAssemblyLocation = Path.Combine(System.IO.Path.GetDirectoryName(typeof<unit>.Assembly.Location), "ilverify", flavor, platform, "FSharp.Core.dll")
         let compilationResult =
             let compilationResult = dummySuccessResult fsharpCoreAssemblyLocation CompileOutput.Library
             match (dummySuccessResult fsharpCoreAssemblyLocation CompileOutput.Library) with
@@ -88,11 +87,6 @@ module FSharp.Core.UnitTests.AssemblyValidation
                     verifyPEFileWithSystemDlls (compilationResult, false)
                 | _ -> compilationResult
             | _ -> compilationResult
-
         compilationResult
+        |> withOutputMatchesBaseline (Path.Combine(__SOURCE_DIRECTORY__, $"FSharp.Core.ILVerify.{platform}.{flavor}.bsl"))
         |> shouldSucceed
-        |> withOutputMatchesBaselineWithWildcards (Path.Combine(__SOURCE_DIRECTORY__, $"FSharp.Core.ILVerify.bsl"))
-//        |> withOutputContainsAllInOrderWithWildcards [
-//          "37 Error(s) Verifying *FSharp.Core.dll"
-//            "All Classes and Methods in*FSharp.Core.dll Verified."
-//        ]

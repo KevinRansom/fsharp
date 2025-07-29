@@ -106,7 +106,7 @@
 
   <Target Name="CopyFSharpCoreDll" AfterTargets="Build">
     <ItemGroup>
-      <FSharpCoreAssemblies Include="$(MSBuildThisFileDirectory)..\..\artifacts\bin\FSharp.Core\Debug\**\FSharp.Core.dll" />
+      <FSharpCoreAssemblies Include="$(MSBuildThisFileDirectory)..\..\artifacts\bin\FSharp.Core\**\FSharp.Core.dll" />
     </ItemGroup>
 
     <Copy SourceFiles="@(FSharpCoreAssemblies)" DestinationFiles="@(FSharpCoreAssemblies->'$(TargetDir)IlVerify\%(RecursiveDir)\FSharp.Core.dll')" SkipUnchangedFiles="true" />

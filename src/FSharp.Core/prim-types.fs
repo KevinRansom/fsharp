@@ -581,7 +581,7 @@ namespace Microsoft.FSharp.Core
 
         let inline unsafeDefault<'T> : 'T = (# "ilzero !0" type ('T) : 'T #)
         let inline isinstPrim<'T>(x:objnull) = (# "isinst !0" type ('T) x : objnull #)
-        let inline castclassPrim<'T>(x:obj) = (# "castclass !0" type ('T) x : 'T #)
+        //let inline castclassPrim<'T>(x:obj) = (# "castclass !0" type ('T) x : 'T #)
         let inline notnullPrim<'T when 'T : not struct>(x:'T) = (# "ldnull cgt.un" x : bool #)
 
         let inline iscastPrim<'T when 'T : not struct>(x:objnull) = (# "isinst !0" type ('T) x : 'T #)

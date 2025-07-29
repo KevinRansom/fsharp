@@ -6,6 +6,7 @@ module FSharp.Test.ILVerifierTool
     open FSharp.Test.Compiler
     open System
     open System.IO
+    open System.Text.RegularExpressions
     open TestFramework
 
     [<AutoOpen>]
@@ -14,6 +15,8 @@ module FSharp.Test.ILVerifierTool
         static let config = initialConfig
 
         static let fsharpCoreReference = $"--reference \"{typeof<unit>.Assembly.Location}\""
+
+        static let stripDllPaths (text: string) = Regex.Replace(text, @"(?:[A-Za-z]:)?(?:\\|/)(?:.*?[/\\])*([^\\/]+\.dll)", "$1")
 
         static let systemDllReferences =
             // Get the path containing mecorlib.dll or System.Core.Private.dll
@@ -53,8 +56,10 @@ module FSharp.Test.ILVerifierTool
                 exec config.DotNetExe peverifyFullArgs workingDirectory
 
             // Grab output
-            let outputText = File.ReadAllText(Path.Combine(workingDirectory, "StandardOutput.txt"))
-            let errorText = File.ReadAllText(Path.Combine(workingDirectory, "StandardError.txt"))
+            let outputText = File.ReadAllText(Path.Combine(workingDirectory, "StandardOutput.txt")) |> stripDllPaths
+            File.WriteAllText(Path.Combine(workingDirectory, "StandardOutput.cleaned"), outputText)
+            let errorText = File.ReadAllText(Path.Combine(workingDirectory, "StandardError.txt")) |> stripDllPaths
+            File.WriteAllText(Path.Combine(workingDirectory, "StandardError.cleaned"), errorText)
 
             match exitCode with
             | 0 -> {Outcome = NoExitCode; StdOut = outputText; StdErr = errorText } 
