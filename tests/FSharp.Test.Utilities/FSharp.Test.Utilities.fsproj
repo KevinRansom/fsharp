@@ -37,8 +37,8 @@
     <Compile Include="ProjectGeneration.fs" />
     <Compile Include="Assert.fs" />
     <Compile Include="ScriptHelpers.fs" />
-    <Compile Include="Compiler.fs" />
     <Compile Include="ILVerifierModule.fs" />
+    <Compile Include="Compiler.fs" />
     <Compile Include="DirectoryAttribute.fs" />
     <Compile Include="FileInlineDataAttribute.fs" />
     <Compile Include="ReflectionHelper.fs" />

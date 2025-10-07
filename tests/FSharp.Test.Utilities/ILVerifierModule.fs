@@ -1,15 +1,12 @@
 ﻿// Copyright (c) Microsoft Corporation.  All Rights Reserved.  See License.txt in the project root for license information.
-[<AutoOpen>]
 module FSharp.Test.ILVerifierTool
 
     open FSharp.Test
-    open FSharp.Test.Compiler
     open System
     open System.IO
     open System.Text.RegularExpressions
     open TestFramework
 
-    [<AutoOpen>]
     type ILVerifierModule =
 
         static let config = initialConfig
@@ -18,22 +15,13 @@ module FSharp.Test.ILVerifierTool
 
         static let stripDllPaths (text: string) = Regex.Replace(text, @"(?:[A-Za-z]:)?(?:\\|/)(?:.*?[/\\])*([^\\/]+\.dll)", "$1")
 
-        static let systemDllReferences =
-            // Get the path containing mecorlib.dll or System.Core.Private.dll
-            let refs =
-                let systemPath = Path.GetDirectoryName(typeof<obj>.Assembly.Location)
-                DirectoryInfo(systemPath).GetFiles("*.dll")
-                |> Array.map (fun dll -> $"--reference \"{Path.Combine(systemPath, dll.FullName)}\"")
-                |> Array.toList
-            (fsharpCoreReference :: refs)
-
         static let exec (dotnetExe: string) args workingDirectory =
             let arguments = args |> String.concat " "
             let exitCode, _output, errors = Commands.executeProcess dotnetExe arguments workingDirectory
             let errors = errors |> String.concat Environment.NewLine
             errors, exitCode
 
-        static let verifyPEFileCore peverifierArgs dllFilePath verbose =
+        static member verifyPEFileCore peverifierArgs dllFilePath =
             let nuget_packages =
                 match Environment.GetEnvironmentVariable("NUGET_PACKAGES") with
                 | null ->
@@ -44,7 +32,6 @@ module FSharp.Test.ILVerifierTool
             let peverifyFullArgs = [
                 yield "exec"
                 yield $"""{nuget_packages}/dotnet-ilverify/9.0.0/tools/net9.0/any/ILVerify.dll"""
-                if verbose then yield "--verbose"
                 yield dllFilePath
                 yield! peverifierArgs
             ]
@@ -65,24 +52,13 @@ module FSharp.Test.ILVerifierTool
             | 0 -> {Outcome = NoExitCode; StdOut = outputText; StdErr = errorText } 
             | _ -> {Outcome = ExitCode exitCode; StdOut = outputText; StdErr = errorText }
 
-        static let verifyPEFileAux (compilationResult: CompilationResult) args verbose =
-            let result =
-                match compilationResult.Compilation with
-                | FS _ ->
-                    match compilationResult, compilationResult.OutputPath with
-                    | CompilationResult.Success result, Some name ->
-                        let verifyResult = verifyPEFileCore args name verbose
-                        match verifyResult.Outcome with
-                        | NoExitCode -> CompilationResult.Success {result with Output = Some (ExecutionOutput verifyResult)}
-                        | ExitCode _ -> CompilationResult.Failure {result with Output = Some (ExecutionOutput verifyResult)}
-                        | failed -> failwith $"Verification failed with exception: {failed}"
-                    | failed ->
-                        failwith $"""Compilation must succeed in order to verify IL.{failed}"""
-                | _ ->
-                    failwith "PEVerify is only supported for F#."
-            result
+        static member systemDllReferences =
+            // Get the path containing mecorlib.dll or System.Core.Private.dll
+            let refs =
+                let systemPath = Path.GetDirectoryName(typeof<obj>.Assembly.Location)
+                DirectoryInfo(systemPath).GetFiles("*.dll")
+                |> Array.map (fun dll -> $"--reference \"{Path.Combine(systemPath, dll.FullName)}\"")
+                |> Array.toList
+            (fsharpCoreReference :: refs)
 
-        static member verifyPEFileWithSystemDlls(compilationResult: CompilationResult, ?verbose:bool) =
-            let verbose = defaultArg verbose false
-            verifyPEFileAux compilationResult systemDllReferences verbose
-             
+

@@ -631,7 +631,7 @@ let main _args =
         |> withNoWarn 25
         |> asExe
         |> compile
-        |> ILVerifierModule.verifyPEFileWithSystemDlls
+        |> verifyPEBaseline
         |> run
         |> verifyOutputContains [|"main;18;hello;42;"|]
     

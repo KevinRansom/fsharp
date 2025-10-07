@@ -43,7 +43,7 @@ module MyModule =
             "Hello, World from MyLibrary.MySecondType"
             "Hello from main method"
         ]
-        |> verifyPEFileWithSystemDlls
+        |> verifyPEBaseline
         |> withOutputContainsAllInOrderWithWildcards [
             "All Classes and Methods in*SimpleTypesInNamespace.exe Verified."
             ]
@@ -75,7 +75,7 @@ printfn "Hello from implicit main method"
             "Hello, World from MyProgram.MySecondType"
             "Hello from implicit main method"
         ]
-        |> verifyPEFileWithSystemDlls
+        |> verifyPEBaseline
         |> withOutputContainsAllInOrderWithWildcards [
             "All Classes and Methods in*SimpleTypesInImplicitMain.exe Verified."
             ]
@@ -111,7 +111,7 @@ module MyModule =
             "Hello from main method"
         ]
         |> shouldSucceed
-        |> verifyPEFileWithSystemDlls
+        |> verifyPEBaseline
         |> withOutputContainsAllInOrderWithWildcards [
             "All Classes and Methods in*SimpleTypeOneAndTypeTwoInNamespace.exe Verified."
             ]
@@ -153,7 +153,7 @@ module doit =
         |> withStdOutContainsAllInOrder [
             "Main program"
         ]
-        |> verifyPEFileWithSystemDlls
+        |> verifyPEBaseline
         |> withOutputContainsAllInOrderWithWildcards [
             "All Classes and Methods in*PublicTypePublicCtor.exe Verified."
             ]
@@ -196,7 +196,7 @@ module doit =
         |> withStdOutContainsAllInOrder [
             "Main program"
         ]
-        |> verifyPEFileWithSystemDlls
+        |> verifyPEBaseline
         |> withOutputContainsAllInOrderWithWildcards [
             "All Classes and Methods in*PublicTypeInternalCtor.exe Verified."
             ]
@@ -239,7 +239,7 @@ module doit =
         |> withStdOutContainsAllInOrder [
             "Main program"
         ]
-        |> verifyPEFileWithSystemDlls
+        |> verifyPEBaseline
         |> withOutputContainsAllInOrderWithWildcards [
             "All Classes and Methods in*PublicTypePrivateCtor.exe Verified."
             ]
@@ -281,7 +281,7 @@ module doit =
         |> withStdOutContainsAllInOrder [
             "Main program"
         ]
-        |> verifyPEFileWithSystemDlls
+        |> verifyPEBaseline
         |> withOutputContainsAllInOrderWithWildcards [
             "All Classes and Methods in*PublicTypeUnspecifiedCtor.exe Verified."
             ]
@@ -323,7 +323,7 @@ module doit =
         |> withStdOutContainsAllInOrder [
             "Main program"
         ]
-        |> verifyPEFileWithSystemDlls
+        |> verifyPEBaseline
         |> withOutputContainsAllInOrderWithWildcards [
             "All Classes and Methods in*PrivateTypePublicCtor.exe Verified."
             ]
@@ -365,7 +365,7 @@ module doit =
             "Main program"
         ]
         |> shouldSucceed
-        |> verifyPEFileWithSystemDlls
+        |> verifyPEBaseline
         |> withOutputContainsAllInOrderWithWildcards [
             "All Classes and Methods in*PrivateTypeInternalCtor.exe Verified."
             ]
@@ -414,7 +414,7 @@ module doit =
         |> withStdOutContainsAllInOrder [
             "Main program"
         ]
-        |> verifyPEFileWithSystemDlls
+        |> verifyPEBaseline
         |> withOutputContainsAllInOrderWithWildcards [
             "All Classes and Methods in*PrivateTypePrivateCtor.exe Verified."
             ]
@@ -456,7 +456,7 @@ module doit =
         |> withStdOutContainsAllInOrder [
             "Main program"
         ]
-        |> verifyPEFileWithSystemDlls
+        |> verifyPEBaseline
         |> withOutputContainsAllInOrderWithWildcards [
             "All Classes and Methods in*PrivateTypeUnspecifiedCtor.exe Verified."
             ]
@@ -501,7 +501,7 @@ printfn $"{message}"
         |> withStdOutContainsAllInOrder [
             "Here is something"
         ]
-        |> verifyPEFileWithSystemDlls
+        |> verifyPEBaseline
         |> withOutputContainsAllInOrderWithWildcards [
             "All Classes and Methods in*StaticInitializationNoInlinePrivateField.exe Verified."
             ]
@@ -544,7 +544,7 @@ printfn "%A" (MyClass.result())
         |> withStdOutContainsAllInOrder [
             "Some 3"
         ]
-        |> verifyPEFileWithSystemDlls
+        |> verifyPEBaseline
         |> withOutputContainsAllInOrderWithWildcards [
             "All Classes and Methods in*ComputationExpressionAccessPrivateBinding.exe Verified."
             ]
@@ -565,7 +565,7 @@ printfn "%A" (MyClass.result())
         |> withOptimization optimize
         |> compileAndRun
         |> shouldSucceed
-        |> verifyPEFileWithSystemDlls
+        |> verifyPEBaseline
         |> withOutputContainsAllInOrderWithWildcards [
             "All Classes and Methods in*NestedGenericClosure.exe Verified."
             ]
@@ -613,7 +613,7 @@ module doIt =
         |> withOptimization optimize
         |> compileAndRun
         |> shouldSucceed
-        |> verifyPEFileWithSystemDlls
+        |> verifyPEBaseline
         |> withOutputContainsAllInOrderWithWildcards [
             "All Classes and Methods in*GenericClassWithClosureWithConstraints.exe Verified."
             ]
@@ -780,7 +780,7 @@ type internal AgedLookup<'Token, 'Key, 'Value when 'Value: not struct>(keepStron
         |> withOptimization optimize
         |> compile
         |> shouldSucceed
-        |> verifyPEFileWithSystemDlls
+        |> verifyPEBaseline
         |> withOutputContainsAllInOrderWithWildcards [
             "All Classes and Methods in*AgedLookup.dll Verified."
             ]
@@ -803,7 +803,7 @@ type BigGenericTuple<'a> = BigGenericTuple of int * 'a * byte * int * 'a * byte
         |> withOptimization optimize
         |> compile
         |> shouldSucceed
-        |> verifyPEFileWithSystemDlls
+        |> verifyPEBaseline
         |> withOutputContainsAllInOrderWithWildcards [
             "All Classes and Methods in*BigTuples.dll Verified."
             ]
@@ -825,7 +825,7 @@ let ``for _ in Array groupBy id [||] do ...`` () = [|for _ in Array.groupBy id [
         |> withOptimization optimize
         |> compile
         |> shouldSucceed
-        |> verifyPEFileWithSystemDlls
+        |> verifyPEBaseline
         |> withOutputContainsAllInOrderWithWildcards [
             "All Classes and Methods in*ArrayGroupById.dll Verified."
             ]
@@ -864,7 +864,7 @@ type IMonad<'a> =
     end"""
 
         roundTripWithInterfaceGeneration(realsig, optimize, implementationFile, "GenericParameterOrderRoundtrip")
-        |> verifyPEFileWithSystemDlls
+        |> verifyPEBaseline
         |> withOutputContainsAllInOrderWithWildcards [
             "All Classes and Methods in*GenericParameterOrderRoundtrip.dll Verified."
             ]
@@ -897,7 +897,7 @@ namespace GenericInterfaceTest
       end"""
 
         roundTripWithInterfaceGeneration(realsig, optimize, implementationFile, "MembersBasicRoundtrip")
-        |> verifyPEFileWithSystemDlls
+        |> verifyPEBaseline
         |> withOutputContainsAllInOrderWithWildcards [
             "All Classes and Methods in*MembersBasicRoundtrip.dll Verified."
             ]

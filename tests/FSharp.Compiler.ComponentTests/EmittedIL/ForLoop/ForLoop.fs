@@ -15,7 +15,7 @@ module ForLoop =
         |> ignoreWarnings
         |> compile
         |> verifyILBaseline
-        |> verifyPEFileWithSystemDlls
+        |> verifyPEBaseline
         |> withOutputContainsAllInOrderWithWildcards [
             "All Classes and Methods in*.exe Verified."
             ]

@@ -88,7 +88,7 @@ module Events =
         |> withOptions ["--nowarn:988"]
         |> verifyCompileAndRun
         |> shouldSucceed
-        |> verifyPEFileWithSystemDlls
+        |> verifyPEBaseline
         |> withOutputContainsAllInOrderWithWildcards [
             "All Classes and Methods in*SanityCheck02.exe Verified."
             ]

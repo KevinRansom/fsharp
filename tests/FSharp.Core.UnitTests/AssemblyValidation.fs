@@ -10,7 +10,22 @@ module FSharp.Core.UnitTests.AssemblyValidation
     open FSharp.Test.Utilities
     open TestFramework
 
-    let dummySuccessResult outputFilePath outputType : CompilationResult=
+    let dummySuccessResult outputFilePath outputType baselinePath : CompilationResult =
+        let ilverBaseline =
+            {
+                FilePath = outputFilePath + ".ilver"
+                BslSource = baselinePath
+                Content = Compiler.readFileOrDefault baselinePath
+            }
+
+        let baseline =
+            {
+                SourceFilename = Some "test.fs"
+                FSBaseline = { FilePath = ""; BslSource = ""; Content = None }
+                ILBaseline = { FilePath = ""; BslSource = ""; Content = None }
+                ILVerBaseline = ilverBaseline
+            }
+
         CompilationResult.Success {
             OutputPath    = Some $"{outputFilePath}"
             Dependencies  = []
@@ -20,12 +35,12 @@ module FSharp.Core.UnitTests.AssemblyValidation
             Output        = None
             Compilation   =
                 FS {
-                    Source            = SourceCodeFileKind.Fs { FileName = "test.fs"; SourceText = Some $"module TestCase" }
+                    Source            = SourceCodeFileKind.Fs { FileName = "test.fs"; SourceText = Some "module TestCase" }
                     AdditionalSources = []
-                    Baseline          = None
+                    Baseline          = Some baseline
                     Options           = Compiler.defaultOptions
                     OutputType        = outputType
-                    OutputDirectory   = Some (DirectoryInfo $"{outputFilePath}")
+                    OutputDirectory   = Some (DirectoryInfo outputFilePath)
                     Name              = Some "test"
                     IgnoreWarnings    = false
                     References        = []
@@ -33,7 +48,6 @@ module FSharp.Core.UnitTests.AssemblyValidation
                     StaticLink        = false
                 }
         }
-
 
 // We are testing the surface area of the FSharp.Core assembly.
 // NETCOREAPP builds with netstandard2.1
@@ -79,12 +93,12 @@ module FSharp.Core.UnitTests.AssemblyValidation
 
         let fsharpCoreAssemblyLocation = Path.Combine(System.IO.Path.GetDirectoryName(typeof<unit>.Assembly.Location), "ilverify", flavor, platform, "FSharp.Core.dll")
         let compilationResult =
-            let compilationResult = dummySuccessResult fsharpCoreAssemblyLocation CompileOutput.Library
-            match (dummySuccessResult fsharpCoreAssemblyLocation CompileOutput.Library) with
+            let baseline = getBaselinePath __SOURCE_DIRECTORY__  "FSharp.Core" [".IlVerify"] "ilver"
+            let compilationResult = dummySuccessResult fsharpCoreAssemblyLocation CompileOutput.Library baseline
+            match compilationResult with
             | CompilationResult.Success output ->
                 match output.Compilation with
-                | FS _ ->
-                    verifyPEFileWithSystemDlls (compilationResult, false)
+                | FS _ -> verifyPEBaseline compilationResult
                 | _ -> compilationResult
             | _ -> compilationResult
         compilationResult

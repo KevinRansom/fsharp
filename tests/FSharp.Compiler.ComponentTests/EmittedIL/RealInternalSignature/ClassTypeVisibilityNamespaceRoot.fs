@@ -28,7 +28,7 @@ type public TypeFour () = class end
         |> asLibrary
         |> withRealInternalSignature realSig
         |> compile
-        |> verifyPEFileWithSystemDlls
+        |> verifyPEBaseline
         |> withOutputContainsAllInOrderWithWildcards [
             "All Classes and Methods in*PublicTypeConstructors.dll Verified."
             ]
@@ -198,7 +198,7 @@ type private TypeFour () = class end
         |> asLibrary
         |> withRealInternalSignature realSig
         |> compile
-        |> verifyPEFileWithSystemDlls
+        |> verifyPEBaseline
         |> withOutputContainsAllInOrderWithWildcards [
             "All Classes and Methods in*PrivateTypeConstructors.dll Verified."
             ]
@@ -296,7 +296,7 @@ type public TestType () =
         |> asLibrary
         |> withRealInternalSignature realSig
         |> compile
-        |> verifyPEFileWithSystemDlls
+        |> verifyPEBaseline
         |> withOutputContainsAllInOrderWithWildcards [
             "All Classes and Methods in*PublicTypeInstanceMethods.dll Verified."
             ]
@@ -332,7 +332,7 @@ type private TestType () =
         |> asLibrary
         |> withRealInternalSignature realSig
         |> compile
-        |> verifyPEFileWithSystemDlls
+        |> verifyPEBaseline
         |> withOutputContainsAllInOrderWithWildcards [
             "All Classes and Methods in*PrivateTypeInstanceMethods.dll Verified."
             ]
@@ -369,7 +369,7 @@ type public TestType () =
         |> asLibrary
         |> withRealInternalSignature realSig
         |> compile
-        |> verifyPEFileWithSystemDlls
+        |> verifyPEBaseline
         |> withOutputContainsAllInOrderWithWildcards [
             "All Classes and Methods in*PrivateTypeInstanceMethods.dll Verified."
             ]
@@ -414,7 +414,7 @@ type public TestType () =
         |> asLibrary
         |> withRealInternalSignature realSig
         |> compile
-        |> verifyPEFileWithSystemDlls
+        |> verifyPEBaseline
         |> withOutputContainsAllInOrderWithWildcards [
             "All Classes and Methods in*PrivateTypeInstanceProperties.dll Verified."
             ]
@@ -467,7 +467,7 @@ type public TestType () =
         |> asLibrary
         |> withRealInternalSignature realSig
         |> compile
-        |> verifyPEFileWithSystemDlls
+        |> verifyPEBaseline
         |> withOutputContainsAllInOrderWithWildcards [
             "All Classes and Methods in*PublicTypeInstanceMixedProperties.dll Verified."
             ]
@@ -554,7 +554,7 @@ type private TestType () =
         |> asLibrary
         |> withRealInternalSignature realSig
         |> compile
-        |> verifyPEFileWithSystemDlls
+        |> verifyPEBaseline
         |> withOutputContainsAllInOrderWithWildcards [
             "All Classes and Methods in*PrivateTypeInstanceMixedProperties.dll Verified."
             ]
@@ -630,7 +630,7 @@ type public TestType () =
         |> asLibrary
         |> withRealInternalSignature realSig
         |> compile
-        |> verifyPEFileWithSystemDlls
+        |> verifyPEBaseline
         |> withOutputContainsAllInOrderWithWildcards [
             "All Classes and Methods in*PublicTypeStaticMethods.dll Verified."
             ]
@@ -666,7 +666,7 @@ type public TestType () =
         |> asLibrary
         |> withRealInternalSignature realSig
         |> compile
-        |> verifyPEFileWithSystemDlls
+        |> verifyPEBaseline
         |> withOutputContainsAllInOrderWithWildcards [
             "All Classes and Methods in*PrivateTypeStaticMethods.dll Verified."
             ]
@@ -702,7 +702,7 @@ type public TestType () =
         |> asLibrary
         |> withRealInternalSignature realSig
         |> compile
-        |> verifyPEFileWithSystemDlls
+        |> verifyPEBaseline
         |> withOutputContainsAllInOrderWithWildcards [
             "All Classes and Methods in*PublicTypeStaticProperties.dll Verified."
             ]
@@ -746,7 +746,7 @@ type private TestType () =
         |> asLibrary
         |> withRealInternalSignature realSig
         |> compile
-        |> verifyPEFileWithSystemDlls
+        |> verifyPEBaseline
         |> withOutputContainsAllInOrderWithWildcards [
             "All Classes and Methods in*PrivateTypeStaticProperties.dll Verified."
             ]
@@ -799,7 +799,7 @@ type public TestType () =
         |> asLibrary
         |> withRealInternalSignature realSig
         |> compile
-        |> verifyPEFileWithSystemDlls
+        |> verifyPEBaseline
         |> withOutputContainsAllInOrderWithWildcards [
             "All Classes and Methods in*PublicTypeStatiMixedProperties.dll Verified."
             ]
@@ -884,7 +884,7 @@ type private TestType () =
         |> asLibrary
         |> withRealInternalSignature realSig
         |> compile
-        |> verifyPEFileWithSystemDlls
+        |> verifyPEBaseline
         |> withOutputContainsAllInOrderWithWildcards [
             "All Classes and Methods in*PrivateTypeStatiMixedProperties.dll Verified."
             ]

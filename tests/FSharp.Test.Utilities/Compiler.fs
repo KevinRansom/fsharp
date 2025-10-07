@@ -14,6 +14,7 @@ open Microsoft.CodeAnalysis
 open Microsoft.CodeAnalysis.CSharp
 open Xunit
 open Xunit.Abstractions
+
 open System
 open System.Collections.Immutable
 open System.IO
@@ -25,6 +26,8 @@ open System.Reflection.PortableExecutable
 
 open FSharp.Test.CompilerAssertHelpers
 open TestFramework
+
+open FSharp.Test.ILVerifierTool
 
 open System.Runtime.CompilerServices
 open System.Runtime.InteropServices
@@ -48,6 +51,7 @@ module rec Compiler =
             SourceFilename: string option
             FSBaseline: BaselineFile
             ILBaseline: BaselineFile
+            ILVerBaseline: BaselineFile
         }
 
     type TestType =
@@ -230,48 +234,51 @@ module rec Compiler =
         | true -> Some (File.ReadAllText path)
         | _ -> None
 
-    let createCompilationUnit sourceBaselineSuffix ilBaselineSuffixes directoryPath filename =
+    let getBaselinePath (basePath: string) sourceBaselineSuffix (suffixes: string list) (extension: string) =
+        let baselinePaths =
+            [|
+                for sfx in suffixes do
+            #if DEBUG
+                #if NETCOREAPP
+                    yield basePath + sfx + $".{extension}.netcore.debug.bsl"
+                    yield basePath + sfx + $".{extension}.netcore.bsl"
+                #else
+                    yield basePath + sfx + $".{extension}.net472.debug.bsl"
+                    yield basePath + sfx + $".{extension}.net472.bsl"
+                #endif
+                    yield basePath + sfx + $".{extension}.debug.bsl"
+                    yield basePath + sfx + $".{extension}.bsl"
+            #else
+                #if NETCOREAPP
+                    yield basePath + sfx + $".{extension}.netcore.release.bsl"
+                    yield basePath + sfx + $".{extension}.netcore.bsl"
+                #else
+                    yield basePath + sfx + $".{extension}.net472.release.bsl"
+                    yield basePath + sfx + $".{extension}.net472.bsl"
+                #endif
+                    yield basePath + sfx + $".{extension}.release.bsl"
+                    yield basePath + sfx + $".{extension}.bsl"
+            #endif
+            |]
 
+        let findBaseline = baselinePaths |> Array.tryPick(fun p -> if File.Exists(p) then Some p else None)
+        match findBaseline with
+        | Some s -> s
+        | None -> Path.Combine(basePath, sourceBaselineSuffix, $"{extension}.bsl")
+
+    let createCompilationUnit sourceBaselineSuffix ilBaselineSuffixes directoryPath filename =
         let outputDirectoryPath = createTemporaryDirectory().FullName
         let sourceFilePath = normalizePathSeparator (directoryPath ++ filename)
         let fsBslFilePath = sourceFilePath + sourceBaselineSuffix + ".err.bsl"
-        let ilBslFilePath =
-            let ilBslPaths = [|
-                for baselineSuffix in ilBaselineSuffixes do
-#if DEBUG
-    #if NETCOREAPP
-                    yield sourceFilePath + baselineSuffix + ".il.netcore.debug.bsl"
-                    yield sourceFilePath + baselineSuffix + ".il.netcore.bsl"
-    #else
-                    yield sourceFilePath + baselineSuffix + ".il.net472.debug.bsl"
-                    yield sourceFilePath + baselineSuffix + ".il.net472.bsl"
-    #endif
-                    yield sourceFilePath + baselineSuffix + ".il.debug.bsl"
-                    yield sourceFilePath + baselineSuffix + ".il.bsl"
-#else
-    #if NETCOREAPP
-                    yield sourceFilePath + baselineSuffix + ".il.netcore.release.bsl"
-                    yield sourceFilePath + baselineSuffix + ".il.netcore.bsl"
-    #else
-                    yield sourceFilePath + baselineSuffix + ".il.net472.release.bsl"
-                    yield sourceFilePath + baselineSuffix + ".il.net472.bsl"
-    #endif
-                    yield sourceFilePath + baselineSuffix + ".il.release.bsl"
-                    yield sourceFilePath + baselineSuffix + ".il.bsl"
-#endif
-                |]
-
-            let findBaseline =
-                ilBslPaths
-                |> Array.tryPick(fun p -> if File.Exists(p) then Some p else None)
-            match findBaseline with
-            | Some s -> s
-            | None -> sourceFilePath + sourceBaselineSuffix + ".il.bsl"
+        let ilBslFilePath = getBaselinePath sourceFilePath sourceBaselineSuffix ilBaselineSuffixes "il"
+        let ilverBslFilePath = getBaselinePath sourceFilePath sourceBaselineSuffix ilBaselineSuffixes "ilver"
 
         let fsOutFilePath = normalizePathSeparator (Path.ChangeExtension(outputDirectoryPath ++ filename, ".err"))
         let ilOutFilePath = normalizePathSeparator (Path.ChangeExtension(outputDirectoryPath ++ filename, ".il"))
+        let ilverOutFilePath = normalizePathSeparator (Path.ChangeExtension(outputDirectoryPath ++ filename, ".ilver"))
         let fsBslSource = readFileOrDefault fsBslFilePath
         let ilBslSource = readFileOrDefault ilBslFilePath
+        let ilverBslSource = readFileOrDefault ilverBslFilePath
 
         {   Source            = SourceCodeFileKind.Create(sourceFilePath)
             AdditionalSources = []
@@ -281,6 +288,7 @@ module rec Compiler =
                         SourceFilename = Some sourceFilePath
                         FSBaseline = { FilePath = fsOutFilePath; BslSource = fsBslFilePath; Content = fsBslSource }
                         ILBaseline = { FilePath = ilOutFilePath; BslSource = ilBslFilePath; Content = ilBslSource }
+                        ILVerBaseline = { FilePath = ilverOutFilePath; BslSource = ilverBslFilePath; Content = ilverBslSource }
                     }
             Options           = Compiler.defaultOptions
             OutputType        = Library
@@ -1253,24 +1261,12 @@ Actual:
         snd (Int32.TryParse(Environment.GetEnvironmentVariable("TEST_UPDATE_BSL"))) <> 0
     let updateBaseLineIfEnvironmentSaysSo baseline =
         if updateBaseline () then
-            if FileSystem.FileExistsShim baseline.FilePath then
-                FileSystem.CopyShim(baseline.FilePath, baseline.BslSource, true)
-
-    let assertBaseline expected actual baseline fOnFail =
-        if expected <> actual then
-            fOnFail()
-            updateBaseLineIfEnvironmentSaysSo baseline
-            createBaselineErrors baseline actual
-            Assert.True((expected = actual), convenienceBaselineInstructions baseline expected actual)
-        elif FileSystem.FileExistsShim baseline.FilePath then
-            FileSystem.FileDeleteShim baseline.FilePath
-
+            if File.Exists baseline.FilePath then
+                File.Copy(baseline.FilePath, baseline.BslSource, true)
 
     let private createBaselineErrors (baselineFile: BaselineFile) (actualErrors: string) : unit =
         printfn $"creating baseline error file for convenience: {baselineFile.FilePath}, expected: {baselineFile.BslSource}"
-        let file = FileSystem.OpenFileForWriteShim(baselineFile.FilePath)
-        file.SetLength(0)
-        file.WriteAllText(actualErrors)
+        File.WriteAllText(baselineFile.FilePath, actualErrors)
 
     /// Turn our ErrorInfo back into a genuine FSharpDiagnostic
     let private toFSharpDiagnostic (ei: ErrorInfo) : FSharpDiagnostic =
@@ -1308,13 +1304,11 @@ Actual:
     /// After compile, rebuild and print FSharpDiagnostic[] exactly as before,
     /// then diff against your existing .err.bsl files (few lines will shift).
     let verifyBaseline (cResult: CompilationResult) : CompilationResult =
-        // 1) Grab the ErrorInfo list from the compile result…
         let errorInfos =
             match cResult with
             | CompilationResult.Success o
             | CompilationResult.Failure o -> o.Diagnostics
 
-        // 2) Convert to FSharpDiagnostic[] and format with "%A"
         let formattedActual =
             errorInfos
             |> List.map toFSharpDiagnostic
@@ -1323,7 +1317,6 @@ Actual:
             |> String.concat "\n"
             |> normalizeNewlines
 
-        // 3) Load the old baseline text
         let fsSource =
             match cResult with
             | CompilationResult.Success o
@@ -1336,16 +1329,13 @@ Actual:
             |> Option.defaultValue ""
             |> normalizeNewlines
 
-        // 4) Compare or update
         if expected <> formattedActual then
-            // same update mechanism you already have:
             fsSource.CreateOutputDirectory()
             createBaselineErrors fsSource.Baseline.Value.FSBaseline formattedActual
             updateBaseLineIfEnvironmentSaysSo fsSource.Baseline.Value.FSBaseline
             let msg = convenienceBaselineInstructions fsSource.Baseline.Value.FSBaseline expected formattedActual
             Assert.True(false, msg)
 
-        // 5) Return the original result for fluent chaining
         cResult
 
     let private doILCheck func (il: string list) result =
@@ -1414,6 +1404,48 @@ Actual:
             | _ -> failwith "verifyILBaselineResult: Only F# CompilationResult supported."
 
     let verifyBaselines = verifyBaseline >> verifyILBaseline
+
+    let verifyPEFileAux (compilationResult: CompilationResult) args =
+        let result =
+            match compilationResult.Compilation with
+            | FS compilation ->
+                match compilation.Baseline with
+                | None -> failwith "verifyPEFileAux: No baseline attached to the F# source."
+                | Some baseline ->
+                    match compilationResult, compilationResult.OutputPath with
+                    | CompilationResult.Success result, Some name ->
+                        let verifyResult = ILVerifierModule.verifyPEFileCore args name
+                        match verifyResult.Outcome with
+                        | NoExitCode -> CompilationResult.Success {result with Output = Some (ExecutionOutput verifyResult)}
+                        | ExitCode _ ->
+                            // Failed try update baselines if required
+                            // If we are here then the il file has been produced we can write it back to the baseline location
+                            // if the environment variable TEST_UPDATE_BSL has been set
+                            updateBaseLineIfEnvironmentSaysSo baseline.ILBaseline
+                            createBaselineErrors baseline.ILVerBaseline verifyResult.StdOut
+                            let expected = baseline.ILVerBaseline.Content |> Option.defaultValue ""
+                            let message = convenienceBaselineInstructions baseline.ILVerBaseline expected verifyResult.StdOut
+                            Assert.Fail(message)
+                            CompilationResult.Failure {result with Output = Some (ExecutionOutput verifyResult)}
+
+                        | failed -> failwith $"Verification failed with exception: {failed}"
+                    | failed ->
+                        failwith $"""Compilation must succeed in order to verify IL.{failed}"""
+            | _ ->
+                failwith "PEVerify is only supported for F#."
+        result
+
+    let verifyPEBaseline (compilationResult: CompilationResult) : CompilationResult =
+        match compilationResult with
+        | CompilationResult.Success output ->
+            match output.Compilation with
+            | FS _ ->
+                verifyPEFileAux compilationResult ILVerifierModule.systemDllReferences
+            | _ -> failwith "verifyPEBaseline: Only F# CompilationResult supported."
+        | CompilationResult.Failure f ->
+            match f.Compilation with
+            | FS _ -> compilationResult
+            | _ -> failwith "verifyPEBaseline: Only F# CompilationResult supported."
 
     let normalizeNewlines output =
         let regex = new Regex("(\r\n|\r|\n)", RegexOptions.Singleline ||| RegexOptions.ExplicitCapture)
