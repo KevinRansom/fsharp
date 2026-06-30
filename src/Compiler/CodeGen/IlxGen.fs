@@ -1642,7 +1642,7 @@ let ComputeStorageForFSharpMember cenv valReprInfo memberInfo (vref: ValRef) m =
 /// Compute the representation information for an F#-declared function in a module or an F#-declared extension member.
 /// Note, there is considerable overlap with ComputeStorageForFSharpMember/GetMethodSpecForMemberVal and these could be
 /// rationalized.
-let ComputeStorageForFSharpFunctionOrFSharpExtensionMember (cenv: cenv) cloc valReprInfo (vref: ValRef) m =
+let ComputeStorageForFSharpFunctionOrFSharpExtensionMember (cenv: cenv) cloc eenv valReprInfo (vref: ValRef) m =
     let g = cenv.g
     let nm = vref.CompiledName g.CompilerGlobalState
     let numEnclosingTypars = CountEnclosingTyparsOfActualParentOfVal vref.Deref
@@ -1650,7 +1650,11 @@ let ComputeStorageForFSharpFunctionOrFSharpExtensionMember (cenv: cenv) cloc val
     let tps, witnessInfos, curriedArgInfos, returnTy, retInfo =
         GetValReprTypeInCompiledForm g valReprInfo numEnclosingTypars vref.Type m
 
-    let tyenvUnderTypars = TypeReprEnv.Empty.ForTypars tps
+    let tyenvUnderTypars =
+        if cenv.g.realsig then
+            eenv.tyenv.Add tps
+        else
+            TypeReprEnv.Empty.ForTypars tps
     let methodArgTys, paramInfos = curriedArgInfos |> List.concat |> List.unzip
     let ilMethodArgTys = GenParamTypes cenv m tyenvUnderTypars false methodArgTys
     let ilRetTy = GenReturnType cenv m tyenvUnderTypars returnTy
@@ -1688,7 +1692,7 @@ let IsFSharpValCompiledAsMethod g (v: Val) =
 /// method (possibly and instance method). Otherwise it gets represented as a
 /// static field and property.
 let ComputeStorageForValWithValReprInfo
-    (cenv, optIntraAssemblyInfo: IlxGenIntraAssemblyInfo option, isInteractive, optShadowLocal, vref: ValRef, cloc)
+    (cenv, eenv, optIntraAssemblyInfo: IlxGenIntraAssemblyInfo option, isInteractive, optShadowLocal, vref: ValRef, cloc)
     =
 
     if
@@ -1733,29 +1737,30 @@ let ComputeStorageForValWithValReprInfo
             | _ ->
                 match vref.MemberInfo with
                 | Some memberInfo when not vref.IsExtensionMember -> ComputeStorageForFSharpMember cenv valReprInfo memberInfo vref m
-                | _ -> ComputeStorageForFSharpFunctionOrFSharpExtensionMember cenv cloc valReprInfo vref m
+                | _ -> ComputeStorageForFSharpFunctionOrFSharpExtensionMember cenv cloc eenv valReprInfo vref m
 
 /// Determine how an F#-declared value, function or member is represented, if it is in the assembly being compiled.
 let ComputeAndAddStorageForLocalValWithValReprInfo (cenv, intraAssemblyFieldTable, isInteractive, optShadowLocal) cloc (v: Val) eenv =
     let storage =
-        ComputeStorageForValWithValReprInfo(cenv, Some intraAssemblyFieldTable, isInteractive, optShadowLocal, mkLocalValRef v, cloc)
+        ComputeStorageForValWithValReprInfo(cenv, eenv, Some intraAssemblyFieldTable, isInteractive, optShadowLocal, mkLocalValRef v, cloc)
 
     AddStorageForVal cenv.g (v, notlazy storage) eenv
 
 /// Determine how an F#-declared value, function or member is represented, if it is an external assembly.
-let ComputeStorageForNonLocalVal cenv cloc modref (v: Val) =
+let ComputeStorageForNonLocalVal cenv cloc eenv modref (v: Val) =
     match v.ValReprInfo with
     | None -> error (InternalError("ComputeStorageForNonLocalVal, expected an ValReprInfo for " + v.LogicalName, v.Range))
-    | Some _ -> ComputeStorageForValWithValReprInfo(cenv, None, false, NoShadowLocal, mkNestedValRef modref v, cloc)
+    | Some _ -> ComputeStorageForValWithValReprInfo(cenv, eenv, None, false, NoShadowLocal, mkNestedValRef modref v, cloc)
 
 /// Determine how all the F#-declared top level values, functions and members are represented, for an external module or namespace.
-let rec AddStorageForNonLocalModuleOrNamespaceRef cenv cloc acc (modref: ModuleOrNamespaceRef) (modul: ModuleOrNamespace) =
+let rec AddStorageForNonLocalModuleOrNamespaceRef cenv cloc eenv acc (modref: ModuleOrNamespaceRef) (modul: ModuleOrNamespace) =
     let acc =
         (acc, modul.ModuleOrNamespaceType.ModuleAndNamespaceDefinitions)
         ||> List.fold (fun acc smodul ->
             AddStorageForNonLocalModuleOrNamespaceRef
                 cenv
                 (CompLocForSubModuleOrNamespace cloc smodul)
+                eenv 
                 acc
                 (modref.NestedTyconRef smodul)
                 smodul)
@@ -1763,7 +1768,7 @@ let rec AddStorageForNonLocalModuleOrNamespaceRef cenv cloc acc (modref: ModuleO
     let acc =
         (acc, modul.ModuleOrNamespaceType.AllValsAndMembers)
         ||> Seq.fold (fun acc v ->
-            AddStorageForVal cenv.g (v, InterruptibleLazy(fun _ -> ComputeStorageForNonLocalVal cenv cloc modref v)) acc)
+            AddStorageForVal cenv.g (v, InterruptibleLazy(fun _ -> ComputeStorageForNonLocalVal cenv cloc eenv modref v)) acc)
 
     acc
 
@@ -1779,7 +1784,7 @@ let AddStorageForExternalCcu cenv eenv (ccu: CcuThunk) =
                 (fun smodul acc ->
                     let cloc = CompLocForSubModuleOrNamespace cloc smodul
                     let modref = mkNonLocalCcuRootEntityRef ccu smodul
-                    AddStorageForNonLocalModuleOrNamespaceRef cenv cloc acc modref smodul)
+                    AddStorageForNonLocalModuleOrNamespaceRef cenv cloc eenv acc modref smodul)
                 ccu.RootModulesAndNamespaces
                 eenv
 
@@ -1788,7 +1793,7 @@ let AddStorageForExternalCcu cenv eenv (ccu: CcuThunk) =
 
             (eenv, ccu.Contents.ModuleOrNamespaceType.AllValsAndMembers)
             ||> Seq.fold (fun acc v ->
-                AddStorageForVal cenv.g (v, InterruptibleLazy(fun _ -> ComputeStorageForNonLocalVal cenv cloc eref v)) acc)
+                AddStorageForVal cenv.g (v, InterruptibleLazy(fun _ -> ComputeStorageForNonLocalVal cenv cloc eenv eref v)) acc)
 
         eenv
 
@@ -9671,7 +9676,12 @@ and GenMethodForBinding
 
     // The type parameters of the method's type are different to the type parameters
     // for the big lambda ("tlambda") of the implementation of the method.
-    let eenvUnderMethLambdaTypars = EnvForTypars methLambdaTypars eenv
+    let eenvUnderMethLambdaTypars =
+        if cenv.g.realsig then
+            AddTyparsToEnv methLambdaTypars eenv
+        else
+            EnvForTypars methLambdaTypars eenv
+
     let eenvUnderMethTypeClassTypars = EnvForTypars ctps eenv
     let eenvUnderMethTypeTypars = AddTyparsToEnv mtps eenvUnderMethTypeClassTypars
 
@@ -10471,11 +10481,15 @@ and AllocValReprWithinExpr cenv cgbuf endMark cloc v eenv =
     // TLR lifts avoid generic enclosing scopes (#17607); namespace-root lifts use the per-file
     // init class to avoid generated-name collisions in the shared <PrivateImplementationDetails$Asm>.
     let effectiveCloc =
+
         if v.IsCompiledAsTopLevel && not v.IsMemberOrModuleBinding then
-            if eenv.moduleCloc.Enclosing.IsEmpty then
+            if eenv.realsig then
+                cloc
+            elif eenv.moduleCloc.Enclosing.IsEmpty then
                 CompLocForInitClass eenv.moduleCloc
             else
                 eenv.moduleCloc
+
         else
             cloc
 

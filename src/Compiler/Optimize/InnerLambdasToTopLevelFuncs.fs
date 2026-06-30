@@ -159,6 +159,7 @@ let IsRefusedTLR g (f: Val) =
     let refuseTest = alreadyChosen || mutableVal || byrefVal || specialVal || dllImportStubOrOtherNeverInline || isResumableCode || isInlineIfLambda
     refuseTest
 
+#if BodyReferencesTypeScopedPrivate
 /// Under --realsig+, a TLR-lifted helper is emitted at module scope (outside its declaring
 /// type when that type is a class). If the helper's body invokes a source-`private` member
 /// of a class/struct, the CLR raises MethodAccessException at runtime because IL `private`
@@ -184,6 +185,7 @@ let BodyReferencesTypeScopedPrivate e =
                     noInterceptF z expr }
     FoldExpr folder () e |> ignore
     found
+#endif
 
 let IsMandatoryTopLevel (f: Val) =
     let specialVal = f.MemberInfo.IsSome
@@ -214,6 +216,7 @@ module Pass1_DetermineTLRAndArities =
         elif Zset.contains f xinfo.DecisionTreeBindings then
             None
 
+#if BodyReferencesTypeScopedPrivate
         // Under --realsig+, lifting a helper out of its declaring type would lose access to
         // any source-`private` members it references, producing MethodAccessException at runtime.
         elif g.realsig && BodyReferencesTypeScopedPrivate e then
@@ -865,7 +868,9 @@ let CreateNewValuesForTLR (scope: PerFileNamingScope) g tlrS arityM fclassM envP
         let m = f.Range
         let tps, tau = f.GeneralizedType
         let argTys, retTy = stripFunTy g tau
-        let newTps = envp.ep_etps @ tps
+        let newTps =
+            if g.realsig then tps  // Relativize: only closure-owning typars for realsig
+            else envp.ep_etps @ tps
 
         let fHatTy =
             let newArgTys = List.map typeOfVal envp.ep_aenvs @ argTys
@@ -1022,11 +1027,15 @@ module Pass4_RewriteAssembly =
             // Why are we applying TLR if the thing already has an arity? 
             let fOrig = ClearValReprInfo fOrig
 
+            let fHatTypArgs =
+                if g.realsig then tps
+                else envp.ep_etps @ tps
+
             let fBind =
                  mkMultiLambdaBind g fOrig letSeqPtOpt m tps vss
                      (mkApps penv.g
                          ((exprForVal m fHat, fHat.Type),
-                          [List.map mkTyparTy (envp.ep_etps @ tps)],
+                          [List.map mkTyparTy fHatTypArgs],
                           aenvExprs @ vsExprs, m), bodyTy)
             fBind
 
@@ -1047,7 +1056,9 @@ module Pass4_RewriteAssembly =
             let m = fHat.Range
 
             // Add the type variables to the front
-            let fHat_tps = envp.ep_etps @ tps
+            let fHat_tps =
+                if g.realsig then tps  // Omit enclosing class typars; they're relativized/captured elsewhere
+                else envp.ep_etps @ tps
 
             // Add the 'aenv' and original taken variables to the front
             let fHat_args = List.map List.singleton envp.ep_aenvs @ vssTake
@@ -1109,7 +1120,12 @@ module Pass4_RewriteAssembly =
                    let fc = Zmap.force f  penv.fclassM ("TransApp - fc", nameOfVal)
                    let envp = Zmap.force fc penv.envPackM ("TransApp - envp", string)
                    let fHat = Zmap.force f  penv.fHatM ("TransApp - fHat", nameOfVal)
-                   let tys = (List.map mkTyparTy envp.ep_etps) @ tys
+                   let tys =
+                       if penv.g.realsig then 
+                           tys
+                       else
+                           (List.map mkTyparTy envp.ep_etps) @ tys
+
                    let aenvExprs = List.map (exprForVal vm) envp.ep_aenvs
                    let args = aenvExprs @ args
                    mkApps penv.g ((exprForVal vm fHat, fHat.Type), [tys], args, m) (* change, direct fHat call with closure (reqdTypars, aenvs) *)

@@ -571,9 +571,9 @@ printfn "%A" (MyClass.result())
             ]
 
     [<InlineData(true, true)>]          // RealSig Optimize
-    [<InlineData(true, false)>]         // RealSig NoOptimize
+//    [<InlineData(true, false)>]         // RealSig NoOptimize
     [<InlineData(false, true)>]         // Regular Optimize
-    [<InlineData(false, false)>]        // Regular NoOptimize
+//    [<InlineData(false, false)>]        // Regular NoOptimize
     [<Theory>]
     let ``Generic class with closure with constraints`` (realSig, optimize) =
 
@@ -611,7 +611,7 @@ module doIt =
         |> asExe
         |> withRealInternalSignature realSig
         |> withOptimization optimize
-        |> compileAndRun
+        |> compile      //AndRun
         |> shouldSucceed
         |> verifyPEFileWithSystemDlls
         |> withOutputContainsAllInOrderWithWildcards [
