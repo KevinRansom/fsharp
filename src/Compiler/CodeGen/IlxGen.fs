@@ -573,6 +573,12 @@ type TypeReprEnv
         |> List.filter (fun tp -> not tp.IsCompilerGenerated)
         |> Zset.ofList typarOrder
 
+    member eenv.AsTypars() =
+        reprs
+        |> Map.toList
+        |> List.map (fun (_, (_, tp)) -> tp)
+        |> Zset.ofList typarOrder
+
 //--------------------------------------------------------------------------
 // Generate type references
 //--------------------------------------------------------------------------
@@ -1200,6 +1206,9 @@ and IlxGenEnv =
         /// The representation decisions for the (non-erased) type parameters that are in scope
         tyenv: TypeReprEnv
 
+        /// The representation decisions for the (non-erased) type parameters for the methods parent that are in scope - only for realsig
+        methodParentEnvironmentTyparsRealsig: Typars option
+
         /// An ILType for some random type in this assembly
         someTypeInThisAssembly: ILType
 
@@ -1644,6 +1653,16 @@ let ComputeStorageForFSharpMember cenv valReprInfo memberInfo (vref: ValRef) m =
 /// rationalized.
 let ComputeStorageForFSharpFunctionOrFSharpExtensionMember (cenv: cenv) cloc eenv valReprInfo (vref: ValRef) m =
     let g = cenv.g
+    let eenv =
+        match vref.MemberInfo with
+        | Some _ when vref.HasDeclaringEntity && g.realsig ->
+            let ctps = eenv.tyenv.AsTypars().ToList()
+            match ctps with
+            | _::_ -> {eenv with methodParentEnvironmentTyparsRealsig = Some ctps}
+            | _ -> eenv
+        | _ ->
+            eenv
+
     let nm = vref.CompiledName g.CompilerGlobalState
     let numEnclosingTypars = CountEnclosingTyparsOfActualParentOfVal vref.Deref
 
@@ -1651,10 +1670,13 @@ let ComputeStorageForFSharpFunctionOrFSharpExtensionMember (cenv: cenv) cloc een
         GetValReprTypeInCompiledForm g valReprInfo numEnclosingTypars vref.Type m
 
     let tyenvUnderTypars =
-        if cenv.g.realsig then
-            eenv.tyenv.Add tps
-        else
+        match g.realsig, eenv.methodParentEnvironmentTyparsRealsig with
+        | true, Some parentTypars ->
+            let tyenv = TypeReprEnv.Empty.ForTypars parentTypars
+            tyenv.Add tps
+        | _ ->
             TypeReprEnv.Empty.ForTypars tps
+
     let methodArgTys, paramInfos = curriedArgInfos |> List.concat |> List.unzip
     let ilMethodArgTys = GenParamTypes cenv m tyenvUnderTypars false methodArgTys
     let ilRetTy = GenReturnType cenv m tyenvUnderTypars returnTy
@@ -9653,6 +9675,16 @@ and GenMethodForBinding
             AddEnclosingToEnv eenv declTref.Enclosing declTref.Name None
         | _ -> eenv
 
+    let eenv =
+        match v.MemberInfo with
+        | Some _ when v.HasDeclaringEntity && g.realsig ->
+            let ctps = eenv.tyenv.AsTypars().ToList()
+            match ctps with
+            | _::_ -> {eenv with methodParentEnvironmentTyparsRealsig = Some ctps}
+            | _ -> eenv
+        | _ ->
+            eenv
+
     // If a method has a witness-passing version of the code, then suppress
     // the generation of any witness in the non-witness passing version of the code
     let eenv =
@@ -9677,9 +9709,11 @@ and GenMethodForBinding
     // The type parameters of the method's type are different to the type parameters
     // for the big lambda ("tlambda") of the implementation of the method.
     let eenvUnderMethLambdaTypars =
-        if cenv.g.realsig then
+        match g.realsig, v.HasDeclaringEntity, eenv.methodParentEnvironmentTyparsRealsig with
+        | true, false, Some parentTypars ->
+            let eenv = EnvForTypars parentTypars eenv
             AddTyparsToEnv methLambdaTypars eenv
-        else
+        | _ ->
             EnvForTypars methLambdaTypars eenv
 
     let eenvUnderMethTypeClassTypars = EnvForTypars ctps eenv
@@ -12918,6 +12952,7 @@ let GetEmptyIlxGenEnv (g: TcGlobals) ccu =
 
     {
         tyenv = TypeReprEnv.Empty
+        methodParentEnvironmentTyparsRealsig = None
         cloc = ccuLoc
         moduleCloc = ccuLoc
         initClassCompLoc = None
