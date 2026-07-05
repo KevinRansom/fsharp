@@ -868,8 +868,10 @@ let CreateNewValuesForTLR (scope: PerFileNamingScope) g tlrS arityM fclassM envP
         let tps, tau = f.GeneralizedType
         let argTys, retTy = stripFunTy g tau
         let newTps =
-            if g.realsig then tps  // Relativize: only closure-owning typars for realsig
-            else envp.ep_etps @ tps
+            if g.realsig then
+                tps  // Relativize: only closure-owning typars for realsig
+            else
+                envp.ep_etps @ tps
 
         let fHatTy =
             let newArgTys = List.map typeOfVal envp.ep_aenvs @ argTys
@@ -1027,8 +1029,10 @@ module Pass4_RewriteAssembly =
             let fOrig = ClearValReprInfo fOrig
 
             let fHatTypArgs =
-                if g.realsig then tps
-                else envp.ep_etps @ tps
+                if g.realsig then
+                    tps
+                else
+                    envp.ep_etps @ tps
 
             let fBind =
                  mkMultiLambdaBind g fOrig letSeqPtOpt m tps vss
@@ -1056,8 +1060,10 @@ module Pass4_RewriteAssembly =
 
             // Add the type variables to the front
             let fHat_tps =
-                if g.realsig then tps  // Omit enclosing class typars; they're relativized/captured elsewhere
-                else envp.ep_etps @ tps
+                if g.realsig then
+                    tps  // Omit enclosing class typars; they're relativized/captured elsewhere
+                else
+                    envp.ep_etps @ tps
 
             // Add the 'aenv' and original taken variables to the front
             let fHat_args = List.map List.singleton envp.ep_aenvs @ vssTake
@@ -1104,7 +1110,6 @@ module Pass4_RewriteAssembly =
     //-------------------------------------------------------------------------
     // pass4: TransApp (translate)
     //-------------------------------------------------------------------------
-
     let TransApp penv (fx, fty, tys, args, m) =
         // Is it a val app, where the val f is TLR with arity wf?
         // CLEANUP NOTE: should be using a mkApps to make all applications
