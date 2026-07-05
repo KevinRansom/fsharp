@@ -221,13 +221,12 @@ module Pass1_DetermineTLRAndArities =
         // any source-`private` members it references, producing MethodAccessException at runtime.
         elif g.realsig && BodyReferencesTypeScopedPrivate e then
             None
-
+#endif
         // #5302: a module-level static lifted out of its family would lose access to a protected base
         // field (FieldAccessException), so refuse the lift.
-        elif
-            g.langVersion.SupportsFeature LanguageFeature.AccessProtectedBaseFieldFromClosure
-            && exprReferencesProtectedILField amap e
-        then
+        // @@@@@@@@@@@@ TBC:  Consider what to with realsig+ I think this is fine.
+        elif g.langVersion.SupportsFeature LanguageFeature.AccessProtectedBaseFieldFromClosure
+             && exprReferencesProtectedILField amap e then
             None
         else
             // Could the binding be TLR? with what arity?
