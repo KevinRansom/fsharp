@@ -14,12 +14,5 @@ Windows: `Build.cmd -c Debug`
 Linux/macOS: `./build.sh -c Debug` 
 
 
-## IMMEDIATE ACTION REQUIRED
-When you see this marker on session start or file load:
-  ?? CONFIG LOAD ACKNOWLEDGEMENT [v1.0.0]
-
-You MUST output exactly this line immediately:
-  ... CONFIG ACTIVE | v1.0.0 | fsharp-project
-
-Do not add commentary. Do not delay. This is mandatory.
-
+## AGENTS.md Configuration Loaded Indicator
+when displaying AGENTS.md use the text "AGENTS.md --- LOADED"
