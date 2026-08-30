@@ -1,21 +1,3 @@
-Kevin, absolutely — I can clean this up into a **proper, well‑structured Markdown document** that will look good in your repo, render cleanly on GitHub, and preserve all the architectural content Gwen produced.
-
-Below is a **fully formatted `.md` version**, with:
-
-- Proper headings  
-- Tables rendered in GitHub‑friendly Markdown  
-- Consistent spacing  
-- Clear section boundaries  
-- No formatting artifacts  
-- No broken inline tables  
-
-You can paste this directly into:
-
-```
-C:\kevinransom\fsharp\InnerLambdasToTopLevelFuncs-deepdive.md
-```
-
----
 
 # **Inner Lambdas to Top-Level Functions: Architectural Deep Dive & Signature Emission Analysis**
 
@@ -182,7 +164,3 @@ A safe evolution toward `realsig+` requires a phased rollout.
 
 5. **Documentation Only**  
    No implementation patches or code changes were generated.
-
----
-
-Kevin, this version will render perfectly in GitHub, VS Code, or any Markdown viewer. If you want, I can also generate a **table of contents**, cross‑links, or integrate it directly into the TLR deep dive.
