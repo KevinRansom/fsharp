@@ -1,0 +1,44 @@
+{
+	"folders": [
+		{
+			"path": ".."
+		}
+	],
+	"settings": {
+		"files.associations": {
+			"*.csproj": "msbuild",
+			"*.fsproj": "msbuild",
+			"*.nuspec": "xml",
+			"*.props": "msbuild",
+			"*.targets": "msbuild",
+			"*.vsixmanifest": "xml",
+			"*.vstemplate": "xml"
+		},
+		"explorer.fileNesting.expand": false,
+		"FSharp.suggestGitignore": false,
+		"FSharp.enableMSBuildProjectGraph": true,
+		"FSharp.enableAdaptiveLspServer": true,
+		"FSharp.workspacePath": "./VisualFSharp.slnx",
+		"FSharp.workspaceModePeekDeepLevel": 1,
+		"FSharp.excludeProjectDirectories": [
+			".git",
+			".vscode",
+			"eng",
+			"artifacts",
+			"fcs-samples",
+			"tests/projects",
+			"tests/benchmarks",
+			"tests/EndToEndBuildTests"
+		],
+		"csharp.showOmnisharpLogOnError": false,
+		"csharp.suppressBuildAssetsNotification": true,
+		"csharp.suppressDotnetInstallWarning": true,
+		"csharp.suppressDotnetRestoreNotification": true,
+		"csharp.suppressHiddenDiagnostics": true,
+		"omnisharp.autoStart": false,
+		"omnisharp.enableMsBuildLoadProjectsOnDemand": true,
+		"omnisharp.disableMSBuildDiagnosticWarning": true,
+		"omnisharp.useModernNet": true,
+		"dotnet.defaultSolution": "FSharp.Compiler.Service.slnx"
+	}
+}

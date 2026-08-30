@@ -168,22 +168,22 @@ let IsRefusedTLR g (f: Val) =
 /// IL class as the private val. F# RecdFields always compile to IL `assembly` or wider, so
 /// field access is safe; only val/method references whose declaring entity is a class need
 /// to be checked.
-let BodyReferencesTypeScopedPrivate e =
-    let mutable found = false
-    let folder =
-        { ExprFolder0 with
-            exprIntercept = fun _recurseF noInterceptF z expr ->
-                if found then z
-                else
-                    match expr with
-                    | Expr.Val (vref, _, _) when vref.Accessibility.IsPrivate ->
-                        match vref.TryDeclaringEntity with
-                        | Parent eref when not eref.IsModuleOrNamespace -> found <- true
-                        | _ -> ()
-                    | _ -> ()
-                    noInterceptF z expr }
-    FoldExpr folder () e |> ignore
-    found
+//let BodyReferencesTypeScopedPrivate e =
+//    let mutable found = false
+//    let folder =
+//        { ExprFolder0 with
+//            exprIntercept = fun _recurseF noInterceptF z expr ->
+//                if found then z
+//                else
+//                    match expr with
+//                    | Expr.Val (vref, _, _) when vref.Accessibility.IsPrivate ->
+//                        match vref.TryDeclaringEntity with
+//                        | Parent eref when not eref.IsModuleOrNamespace -> found <- true
+//                        | _ -> ()
+//                    | _ -> ()
+//                    noInterceptF z expr }
+//    FoldExpr folder () e |> ignore
+//    found
 
 let IsMandatoryTopLevel (f: Val) =
     let specialVal = f.MemberInfo.IsSome
@@ -216,8 +216,8 @@ module Pass1_DetermineTLRAndArities =
 
         // Under --realsig+, lifting a helper out of its declaring type would lose access to
         // any source-`private` members it references, producing MethodAccessException at runtime.
-        elif g.realsig && BodyReferencesTypeScopedPrivate e then
-            None
+        //elif g.realsig && BodyReferencesTypeScopedPrivate e then
+        //    None
 
         // #5302: a module-level static lifted out of its family would lose access to a protected base
         // field (FieldAccessException), so refuse the lift.
