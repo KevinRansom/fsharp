@@ -168,22 +168,22 @@ let IsRefusedTLR g (f: Val) =
 /// IL class as the private val. F# RecdFields always compile to IL `assembly` or wider, so
 /// field access is safe; only val/method references whose declaring entity is a class need
 /// to be checked.
-//let BodyReferencesTypeScopedPrivate e =
-//    let mutable found = false
-//    let folder =
-//        { ExprFolder0 with
-//            exprIntercept = fun _recurseF noInterceptF z expr ->
-//                if found then z
-//                else
-//                    match expr with
-//                    | Expr.Val (vref, _, _) when vref.Accessibility.IsPrivate ->
-//                        match vref.TryDeclaringEntity with
-//                        | Parent eref when not eref.IsModuleOrNamespace -> found <- true
-//                        | _ -> ()
-//                    | _ -> ()
-//                    noInterceptF z expr }
-//    FoldExpr folder () e |> ignore
-//    found
+let BodyReferencesTypeScopedPrivate e =
+    let mutable found = false
+    let folder =
+        { ExprFolder0 with
+            exprIntercept = fun _recurseF noInterceptF z expr ->
+                if found then z
+                else
+                    match expr with
+                    | Expr.Val (vref, _, _) when vref.Accessibility.IsPrivate ->
+                        match vref.TryDeclaringEntity with
+                        | Parent eref when not eref.IsModuleOrNamespace -> found <- true
+                        | _ -> ()
+                    | _ -> ()
+                    noInterceptF z expr }
+    FoldExpr folder () e |> ignore
+    found
 
 let IsMandatoryTopLevel (f: Val) =
     let specialVal = f.MemberInfo.IsSome
@@ -197,6 +197,10 @@ let IsMandatoryNonTopLevel g (f: Val) =
 //-------------------------------------------------------------------------
 // pass1: decide which f are to be TLR? and if so, arity(f)
 //-------------------------------------------------------------------------
+
+type HomingKind =
+    | HostingClass
+    | HelperClass
 
 module Pass1_DetermineTLRAndArities =
 
@@ -216,8 +220,8 @@ module Pass1_DetermineTLRAndArities =
 
         // Under --realsig+, lifting a helper out of its declaring type would lose access to
         // any source-`private` members it references, producing MethodAccessException at runtime.
-        //elif g.realsig && BodyReferencesTypeScopedPrivate e then
-        //    None
+        elif g.realsig && BodyReferencesTypeScopedPrivate e then
+            None
 
         // #5302: a module-level static lifted out of its family would lose access to a protected base
         // field (FieldAccessException), so refuse the lift.
@@ -247,7 +251,7 @@ module Pass1_DetermineTLRAndArities =
         not isRecursive || List.forall hasDelayedRepr mudefs
 
     let DumpArity arityM =
-        let dump f n = dprintf "tlr: arity %50s = %d\n" (showL (valL f)) n
+        let dump f (n, _homing) = dprintf "tlr: arity %50s = %d\n" (showL (valL f)) n
         Zmap.iter dump arityM
 
     let DetermineTLRAndArities amap g expr =
@@ -258,8 +262,14 @@ module Pass1_DetermineTLRAndArities =
        // There is simply no point - the original value will be duplicated and TLR'd anyway
        let rejectS = GetValsBoundUnderShouldInline xinfo
        let fArities = List.filter (fun (v, _) -> not (Zset.contains v rejectS)) fArities
+       // realsig gate: decide where each TLR function is homed
+       let fArities =
+           if g.realsig then
+               fArities |> List.map (fun (v, a) -> (v, a, HostingClass))
+           else
+               fArities |> List.map (fun (v, a) -> (v, a, HelperClass))
        (*-*)
-       let tlrS = Zset.ofList valOrder (List.map fst fArities)
+       let tlrS = Zset.ofList valOrder (fArities |> List.map (fun (v, _, _) -> v))
        let topValS = xinfo.TopLevelBindings                                 (* genuinely top level *)
        let topValS = Zset.filter (IsMandatoryNonTopLevel g >> not) topValS  (* restrict *)
 #if DEBUG
@@ -269,7 +279,7 @@ module Pass1_DetermineTLRAndArities =
            missed |> Zset.iter (fun v -> dprintf "TopLevel but not TLR = %s\n" v.LogicalName)
        (* REPORT OVER *)
 #endif
-       let arityM = Zmap.ofList valOrder fArities
+       let arityM = Zmap.ofList valOrder (fArities |> List.map (fun (v, a, h) -> (v, (a, h))))
 #if DEBUG
        if verboseTLR then DumpArity arityM
 #endif
@@ -374,9 +384,10 @@ let reqdItemOrder =
 /// The reqdTypars   are the free reqdTypars of the defns, and those required by any direct TLR arity-met calls.
 /// The reqdItems are the ids/subEnvs required from calls to freeVars.
 type ReqdItemsForDefn =
-    { 
+    {
         reqdTypars: Zset<Typar>
         reqdItems: Zset<ReqdItem>
+        ctps: Zset<Typar>
         m: range
     }
 
@@ -389,9 +400,10 @@ type ReqdItemsForDefn =
                reqdTypars = Zset.addList typars env.reqdTypars
                reqdItems = Zset.addList items  env.reqdItems}
 
-    static member Initial typars m =
+    static member Initial (typars, ctps, m) =
         {reqdTypars = Zset.addList typars  (Zset.empty typarOrder)
          reqdItems = Zset.empty reqdItemOrder
+         ctps = ctps
          m = m }
 
     override env.ToString() =
@@ -474,13 +486,13 @@ module Pass2_DetermineReqdItems =
           recShortCallS = Zset.empty valOrder }
 
     /// PUSH = start collecting for fclass
-    let PushFrame (fclass: BindingGroupSharingSameReqdItems) (reqdTypars0, reqdVals0, m) state =
+    let PushFrame (fclass: BindingGroupSharingSameReqdItems) (reqdTypars0, ctps, reqdVals0, m) state =
         if fclass.IsEmpty then
             state
         else
           {state with
                revDeclist = fclass :: state.revDeclist
-               stack = (let env = ReqdItemsForDefn.Initial reqdTypars0 m in (fclass, reqdVals0, env) :: state.stack) }
+               stack = (let env = ReqdItemsForDefn.Initial (reqdTypars0, ctps, m) in (fclass, reqdVals0, env) :: state.stack) }
 
     /// POP & SAVE = end collecting for fclass and store
     let SaveFrame     (fclass: BindingGroupSharingSameReqdItems) state =
@@ -534,7 +546,7 @@ module Pass2_DetermineReqdItems =
              let f = fvref.Deref
              match Zmap.tryFind f arityM with
 
-             | Some wf ->
+             | Some (wf, _homing) ->
                  // f is TLR with arity wf
                  if IsArityMet fvref wf tps args then
                      // arity-met call to a TLR g
@@ -556,19 +568,30 @@ module Pass2_DetermineReqdItems =
              let fclass = BindingGroupSharingSameReqdItems tlrBs
              // what determines env?
              let frees = FreeInBindings tlrBs
-             // put in env
-             let reqdTypars0 = frees.FreeTyvars.FreeTypars |> Zset.elements     
-             // occurrences contribute to env 
+             // realsig+ - ambient class typars of the enclosing host, gathered across the group
+             let ambientCtps0 =
+                 tlrBs
+                 |> List.map (fun b ->
+                     match b.Var.TryDeclaringEntity with
+                     | Parent tcref when not tcref.IsModuleOrNamespace -> tcref.Typars
+                     | _ -> [])
+                 |> List.collect id
+                 |> Zset.ofList typarOrder
+             // realsig+ - split class-typars (ctps) out of the free typars
+             let freeTypars0 = frees.FreeTyvars.FreeTypars
+             let ctpsUsed    = Zset.inter freeTypars0 ambientCtps0
+             let reqdTypars0 = Zset.diff freeTypars0 ctpsUsed |> Zset.elements
+             // occurrences contribute to env
              let reqdVals0 = frees.FreeLocals |> Zset.elements
-             // tlrBs are not reqdVals0 for themselves 
-             let reqdVals0 = reqdVals0 |> List.filter (fclass.Contains >> not) 
-             let reqdVals0 = reqdVals0 |> Zset.ofList valOrder 
-             // collect into env over bodies 
-             let z = PushFrame fclass (reqdTypars0, reqdVals0,m) z
-             let z = (z, tlrBs) ||> List.fold (foldOn (fun b -> b.Expr) recurseF) 
+             // tlrBs are not reqdVals0 for themselves
+             let reqdVals0 = reqdVals0 |> List.filter (fclass.Contains >> not)
+             let reqdVals0 = reqdVals0 |> Zset.ofList valOrder
+             // collect into env over bodies
+             let z = PushFrame fclass (reqdTypars0, ctpsUsed, reqdVals0, m) z
+             let z = (z, tlrBs) ||> List.fold (foldOn (fun b -> b.Expr) recurseF)
              let z = SaveFrame fclass z
-             // for bindings not marked TRL, collect 
-             let z = (z, nonTlrBs) ||> List.fold (foldOn (fun b -> b.Expr) recurseF) 
+             // for bindings not marked TRL, collect
+             let z = (z, nonTlrBs) ||> List.fold (foldOn (fun b -> b.Expr) recurseF)
              z
 
          match expr with
@@ -698,13 +721,16 @@ type PackedReqdItems =
     {
         /// The actual typars
         ep_etps: Typars
-      
+
+        /// realsig+ - class type parameters used in the group body
+        ep_ctps: Typars
+
         /// The actual env carrier values
         ep_aenvs: Val   list
-        
+
         /// Sequentially define the aenvs in terms of the fvs
         ep_pack: Bindings
-        
+
         /// Sequentially define the fvs   in terms of the aenvs
         ep_unpack: Bindings
     }
@@ -821,6 +847,7 @@ let FlatEnvPacks g fclassM topValS declist (reqdItemsMap: Zmap<BindingGroupShari
 
        // result
        (fc, { ep_etps = Zset.elements reqdTypars
+              ep_ctps = Zset.elements env.ctps
               ep_aenvs = aenvs
               ep_pack = pack
               ep_unpack = unpack}), carrierMaps
@@ -858,7 +885,7 @@ let MakeSimpleArityInfo tps n = ValReprInfo (ValReprInfo.InferTyparInfo tps, Lis
 let CreateNewValuesForTLR (scope: PerFileNamingScope) g tlrS arityM fclassM envPackM =
 
     let createFHat (f: Val) =
-        let wf = Zmap.force f arityM ("createFHat - wf", (valL >> showL))
+        let wf, _homing = Zmap.force f arityM ("createFHat - wf", (valL >> showL))
         let fc = Zmap.force f fclassM ("createFHat - fc", nameOfVal)
         let envp = Zmap.force fc envPackM ("CreateNewValuesForTLR - envp", string)
         let name = f.LogicalName (* + "_TLR_" + string wf *)
@@ -899,7 +926,7 @@ module Pass4_RewriteAssembly =
          stackGuard: StackGuard
          tlrS: Zset<Val>
          topValS: Zset<Val>
-         arityM: Zmap<Val, int>
+         arityM: Zmap<Val, int * HomingKind>
          fclassM: Zmap<Val, BindingGroupSharingSameReqdItems>
          recShortCallS: Zset<Val>
          envPackM: Zmap<BindingGroupSharingSameReqdItems, PackedReqdItems>
@@ -1031,7 +1058,7 @@ module Pass4_RewriteAssembly =
             fBind
 
         let fHatNewBinding (shortRecBinds: Bindings) (TBind(f, b, letSeqPtOpt)) =
-            let wf = Zmap.force f penv.arityM ("fHatNewBinding - arityM", nameOfVal)
+            let wf, _homing = Zmap.force f penv.arityM ("fHatNewBinding - arityM", nameOfVal)
             let fHat = Zmap.force f penv.fHatM  ("fHatNewBinding - fHatM", nameOfVal)
 
             // Take off the variables
@@ -1101,7 +1128,7 @@ module Pass4_RewriteAssembly =
         match fx with
         | Expr.Val (fvref: ValRef, _, vm) when
                 (Zset.contains fvref.Deref penv.tlrS) &&
-                (let wf = Zmap.force fvref.Deref penv.arityM ("TransApp - wf", nameOfVal)
+                (let wf, _homing = Zmap.force fvref.Deref penv.arityM ("TransApp - wf", nameOfVal)
                  IsArityMet fvref wf tys args) ->
 
                    let f = fvref.Deref
