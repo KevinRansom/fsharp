@@ -62,14 +62,16 @@ let main _ =
     let a = h.Async() |> Async.RunSynchronously
     if s = 7 && g = "x" && t = 42 && a = 7 then 0 else 1
 """
+        let (present, absent) =
+            match realsig, optimize with
+            | false, _ -> [ "Sample/Seq@"; "Sample/Gen@"; "Sample/Task@"; "Sample/Async@" ], [ "Holder`1/Seq@"; "Holder`1/Gen@"; "Holder`1/Task@"; "Holder`1/Async@" ]
+            | true, _ -> [ "Holder`1/Seq@"; "Holder`1/Gen@"; "Holder`1/Task@"; "Holder`1/Async@" ], [ "Sample/Seq@"; "Sample/Gen@"; "Sample/Task@"; "Sample/Async@" ]
+
         let result =
             src
             |> compileWithFlags realsig optimize
             |> compileAndRun
+            |> shouldSucceed
             |> verifyPEFileWithSystemDlls
-        if realsig = false then
-            result |> verifyILPresent [ "Sample/Seq@"; "Sample/Gen@"; "Sample/Task@"; "Sample/Async@" ]
-            result |> verifyILNotPresent [ "Holder`1/Seq@"; "Holder`1/Gen@"; "Holder`1/Task@"; "Holder`1/Async@" ]
-        else
-            result |> verifyILPresent [ "Holder`1/Seq@"; "Holder`1/Gen@"; "Holder`1/Task@"; "Holder`1/Async@" ]
-            result |> verifyILNotPresent [ "Sample/Seq@"; "Sample/Gen@"; "Sample/Task@"; "Sample/Async@" ]
+        result |> verifyILPresent present
+        result |> verifyILNotPresent absent

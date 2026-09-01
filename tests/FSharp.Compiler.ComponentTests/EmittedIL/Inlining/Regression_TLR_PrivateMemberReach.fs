@@ -29,13 +29,6 @@ module Regression_TLR_PrivateMemberReach =
         |> withOptimization optimize
         |> ignoreWarnings
 
-    let private runAllFour realsig optimize (source: string) =
-        source
-        |> compileWithFlags realsig optimize
-        |> compileAndRun
-        |> shouldSucceed
-        |> ignore
-
     /// What: an inner mutual-rec group in a GENERIC class member that calls a type-private
     /// static of the hosting class must run (no MethodAccessException) under all four
     /// realsig/optimize combos. Accesses a private static, so the lift is never allowed to
@@ -82,10 +75,11 @@ let main _ =
     if s.Run<string>("x") = 21000 then 0 else 1
             """
         let (present, absent) =
-            if realsig then
-                [ "Safe`1::go@"; "Safe`1::skip@" ], [ "Sample::go@"; "Sample::skip@" ]
-            else
-                [ "Sample::go@"; "Sample::skip@" ], [ "Safe`1::go@"; "Safe`1::skip@" ]
+            match realsig, optimize with
+            | false, false -> [ "class Sample/go@11<!T,!!U>::skip" ], [ "class Sample/Safe`1/go@11<!T,!U>::go";"Sample::go@"; "Sample::skip@"; "Sample::skip@" ]
+            | false, true -> [ "Sample::go@"; "Sample::skip@" ], [ "class Sample/Safe`1/go@11<!T,!U>::go";"class Sample/go@11<!T,!!U>::skip"; "Safe`1/go@" ]
+            | true, false -> [ "Safe`1/go@"; "Safe`1/skip@" ], [ "class Sample/Safe`1/go@11<!T,!U>::go";"class Sample/go@11<!T,!!U>::skip"; "Sample::go@"; "Sample::skip@" ]
+            | true, true -> [ "class Sample/Safe`1/go@11<!T,!U>::go"; "Sample::skip@" ], [ "class Sample/go@11<!T,!!U>::skip"; "Sample::go@" ]
 
         let result =
             src
@@ -106,35 +100,6 @@ let main _ =
     /// is out of reach (MethodAccessException), or struct field init interferes.
     [<Theory; InlineData(true, true); InlineData(true, false); InlineData(false, true); InlineData(false, false)>]
     let ``Struct generic class member rec reaching a type-private static runs`` (realsig: bool, optimize: bool) =
-        """
-module Sample
-[<Struct>]
-type Ticker<'T> =
-    val Stage: int
-    [<NoCompilerInlining>]
-    static member private Advance (v: int) = v + 1
-    member this.Run() =
-        let rec walk (n: int) (acc: int) =
-            if n <= 0 then acc
-            else walk (n - 1) (Ticker<'T>.Advance acc)
-        walk 1000 this.Stage
-[<EntryPoint>]
-let main _ =
-    let t = Ticker<int>()
-    if t.Run() = 1000 then 0 else 1
-"""
-        |> runAllFour realsig optimize
-
-    /// What: IL lock for the struct case. Under --realsig+ the walk rec must live inside the
-    /// struct (`Ticker`1/walk@`), never as a module sibling; under --realsig- the flat static
-    /// is emitted.
-    /// Why: structs cannot be extended by the nested-closure fix the same way reference
-    /// types are, so this locks the struct-specific scope decision.
-    /// Breaks if: the walk closure is emitted as a sibling (MethodAccessException at first
-    /// call). When homing lands, expect the --realsig+ branch to flip to `Ticker`1::walk@`
-    /// (homed member static) -- update in the same PR.
-    [<Theory; InlineData(true); InlineData(false)>]
-    let ``Struct private-reach rec nests under realsig+, lifts under realsig-`` (realsig: bool) =
         let src =
             """
 module Sample
@@ -152,17 +117,61 @@ type Ticker<'T> =
 let main _ =
     let t = Ticker<int>()
     if t.Run() = 1000 then 0 else 1
-"""
+            """
         let (present, absent) =
-            if realsig then
-                [ "Ticker`1/walk@" ], [ "Sample/walk@" ]
-            else
-                [ "Sample/walk@" ], [ "Ticker`1/walk@" ]
+            match realsig, optimize with
+            | false, false -> [ "Sample/walk@" ], [ "Sample/Ticker`1/walk@"; "Sample::walk@" ]
+            | false, true -> [ "Sample::walk@" ], [ "Sample/Ticker`1/walk@"; "Sample/walk@" ]
+            | true, _ -> [ "Sample/Ticker`1/walk@" ], [ "Sample/walk@"; "Sample::walk@" ]
 
         let result =
             src
-            |> compileWithFlags realsig true
-            |> compile
+                |> compileWithFlags realsig optimize
+                |> compileAndRun
+                |> shouldSucceed
+                |> verifyPEFileWithSystemDlls
+                |> shouldSucceed
+        result |> verifyILPresent present
+        result |> verifyILNotPresent absent
+
+    /// What: IL lock for the struct case. Under --realsig+ the walk rec must live inside the
+    /// struct (`Ticker`1/walk@`), never as a module sibling; under --realsig- the flat static
+    /// is emitted.
+    /// Why: structs cannot be extended by the nested-closure fix the same way reference
+    /// types are, so this locks the struct-specific scope decision.
+    /// Breaks if: the walk closure is emitted as a sibling (MethodAccessException at first
+    /// call). When homing lands, expect the --realsig+ branch to flip to `Ticker`1::walk@`
+    /// (homed member static) -- update in the same PR.
+    [<Theory; InlineData(true, true); InlineData(true, false); InlineData(false, true); InlineData(false, false)>]
+    let ``Struct private-reach rec nests under realsig+, lifts under realsig-`` (realsig: bool, optimize: bool) =
+        let src =
+            """
+module Sample
+[<Struct>]
+type Ticker<'T> =
+    val Stage: int
+    [<NoCompilerInlining>]
+    static member private Advance (v: int) = v + 1
+    member this.Run() =
+        let rec walk (n: int) (acc: int) =
+            if n <= 0 then acc
+            else walk (n - 1) (Ticker<'T>.Advance acc)
+        walk 1000 this.Stage
+[<EntryPoint>]
+let main _ =
+    let t = Ticker<int>()
+    if t.Run() = 1000 then 0 else 1
+            """
+        let (present, absent) =
+            match realsig, optimize with
+            | false, false -> [ "Sample/walk@"; "Sample/Ticker`1" ], [ "Sample/Ticker`1/walk@"; "Sample::walk@" ]
+            | false, true -> [ "Sample::walk@"; "Sample/Ticker`1" ], [ "Sample/Ticker`1/walk@"; "Sample/Ticker`1::walk@" ]
+            | true, _ -> [ "Sample/Ticker`1/walk@" ], [ "Sample::walk@"; "Sample/Ticker`1::walk@"]
+
+        let result =
+            src
+            |> compileWithFlags realsig optimize
+            |> compileAndRun
             |> shouldSucceed
             |> verifyPEFileWithSystemDlls
             |> shouldSucceed

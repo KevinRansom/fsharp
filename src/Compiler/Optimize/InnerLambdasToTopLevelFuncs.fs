@@ -1477,7 +1477,7 @@ let RecreateUniqueBounds g expr =
 // entry point
 //-------------------------------------------------------------------------
 
-let MakeTopLevelRepresentationDecisions amap (scope: PerFileNamingScope) ccu g expr =
+let MakeTopLevelRepresentationDecisions (amap:Import.ImportMap) (scope: PerFileNamingScope) ccu g expr =
    try
       // pass1: choose the f to be TLR with arity(f)
       let tlrS, topValS, arityM = Pass1_DetermineTLRAndArities.DetermineTLRAndArities amap g expr
