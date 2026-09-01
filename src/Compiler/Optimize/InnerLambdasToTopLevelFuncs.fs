@@ -885,20 +885,33 @@ let MakeSimpleArityInfo tps n = ValReprInfo (ValReprInfo.InferTyparInfo tps, Lis
 let CreateNewValuesForTLR (scope: PerFileNamingScope) g tlrS arityM fclassM envPackM =
 
     let createFHat (f: Val) =
-        let wf, _homing = Zmap.force f arityM ("createFHat - wf", (valL >> showL))
+        let wf, homing = Zmap.force f arityM ("createFHat - wf", (valL >> showL))
         let fc = Zmap.force f fclassM ("createFHat - fc", nameOfVal)
         let envp = Zmap.force fc envPackM ("CreateNewValuesForTLR - envp", string)
         let name = f.LogicalName (* + "_TLR_" + string wf *)
         let m = f.Range
         let tps, tau = f.GeneralizedType
         let argTys, retTy = stripFunTy g tau
-        let newTps = envp.ep_etps @ tps
+        let methodTps = envp.ep_etps @ tps
+
+        // realsig+ - when homing on the hosting class, the class-level type parameters
+        // (ep_ctps) are placed ahead of the method-level ones, so that the wrapper and
+        // call sites can be rewritten as two type-arg groups (class; method).
+        // Under realsig- every typar is a method typar and ep_ctps is ignored here.
+        let realsigCtpSplit =
+            homing = HostingClass
+            && not (isNil envp.ep_ctps)
+            && (match f.TryDeclaringEntity with
+                | Parent tcref when not tcref.IsModuleOrNamespace -> true
+                | _ -> false)
+
+        let fHatTps = if realsigCtpSplit then envp.ep_ctps @ methodTps else methodTps
 
         let fHatTy =
             let newArgTys = List.map typeOfVal envp.ep_aenvs @ argTys
-            mkLambdaTy g newTps newArgTys retTy
+            mkLambdaTy g fHatTps newArgTys retTy
 
-        let fHatArity = MakeSimpleArityInfo newTps (envp.ep_aenvs.Length + wf)
+        let fHatArity = MakeSimpleArityInfo fHatTps (envp.ep_aenvs.Length + wf)
 
         let fHatName =
             scope.Fresh(name, m)
@@ -1044,21 +1057,43 @@ module Pass4_RewriteAssembly =
             let aenvExprs = envp.ep_aenvs |> List.map (exprForVal m)
             let vsExprs = vss |> List.map (mkRefTupledVars penv.g m)
             let fHat = Zmap.force fOrig penv.fHatM ("fRebinding", nameOfVal)
+            let fHoming =
+                match Zmap.tryFind fOrig penv.arityM with
+                | Some (_, h) -> h
+                | None -> HelperClass
 
-            // REVIEW: is this mutation really, really necessary? 
-            // Why are we applying TLR if the thing already has an arity? 
+            // REVIEW: is this mutation really, really necessary?
+            // Why are we applying TLR if the thing already has an arity?
             let fOrig = ClearValReprInfo fOrig
+
+            // realsig+ - when fHat is homed on the hosting class it carries two tiers
+            // of type parameters: class-level (ep_ctps) leading, method-level
+            // (ep_etps @ tps) trailing. Emit them as two type-arg groups so the
+            // downstream codegen can split class vs method level. Under realsig-
+            // (homing = HelperClass) the single-group form is used, exactly as before.
+            let wrapperTyargs =
+                let methodArgs = List.map mkTyparTy (envp.ep_etps @ tps)
+                if
+                    fHoming = HostingClass
+                    && not (isNil envp.ep_ctps)
+                    && (match fOrig.TryDeclaringEntity with
+                        | Parent tcref when not tcref.IsModuleOrNamespace -> true
+                        | _ -> false)
+                then
+                    [List.map mkTyparTy envp.ep_ctps; methodArgs]
+                else
+                    [methodArgs]
 
             let fBind =
                  mkMultiLambdaBind g fOrig letSeqPtOpt m tps vss
                      (mkApps penv.g
                          ((exprForVal m fHat, fHat.Type),
-                          [List.map mkTyparTy (envp.ep_etps @ tps)],
+                          wrapperTyargs,
                           aenvExprs @ vsExprs, m), bodyTy)
             fBind
 
         let fHatNewBinding (shortRecBinds: Bindings) (TBind(f, b, letSeqPtOpt)) =
-            let wf, _homing = Zmap.force f penv.arityM ("fHatNewBinding - arityM", nameOfVal)
+            let wf, homing = Zmap.force f penv.arityM ("fHatNewBinding - arityM", nameOfVal)
             let fHat = Zmap.force f penv.fHatM  ("fHatNewBinding - fHatM", nameOfVal)
 
             // Take off the variables
@@ -1073,8 +1108,22 @@ module Pass4_RewriteAssembly =
             // fHat, args
             let m = fHat.Range
 
-            // Add the type variables to the front
-            let fHat_tps = envp.ep_etps @ tps
+            // realsig+ - when fHat is homed on the hosting class the class-level
+            // type parameters (ep_ctps) are bound ahead of the method-level ones, so
+            // every type parameter is explicitly bound and none is left free in the
+            // body. Under realsig- ep_ctps is ignored, exactly as before.
+            let methodTps = envp.ep_etps @ tps
+            let fHatTps =
+                if
+                    homing = HostingClass
+                    && not (isNil envp.ep_ctps)
+                    && (match f.TryDeclaringEntity with
+                        | Parent tcref when not tcref.IsModuleOrNamespace -> true
+                        | _ -> false)
+                then
+                    envp.ep_ctps @ methodTps
+                else
+                    methodTps
 
             // Add the 'aenv' and original taken variables to the front
             let fHat_args = List.map List.singleton envp.ep_aenvs @ vssTake
@@ -1082,7 +1131,7 @@ module Pass4_RewriteAssembly =
             let fHat_body = mkLetsFromBindings m shortRecBinds  fHat_body  // bind "f" if have short recursive calls (somewhere)
 
             // fHat binding, f rebinding
-            let fHatBind = mkMultiLambdaBind g fHat letSeqPtOpt m fHat_tps fHat_args (fHat_body, bodyTy)
+            let fHatBind = mkMultiLambdaBind g fHat letSeqPtOpt m fHatTps fHat_args (fHat_body, bodyTy)
             fHatBind
 
         let rebinds = binds |> List.map fRebinding
@@ -1132,14 +1181,33 @@ module Pass4_RewriteAssembly =
                  IsArityMet fvref wf tys args) ->
 
                    let f = fvref.Deref
+                   let fHoming =
+                       match Zmap.tryFind f penv.arityM with
+                       | Some (_, h) -> h
+                       | None -> HelperClass
                    (* replace by direct call to corresponding fHat (and additional closure args) *)
                    let fc = Zmap.force f  penv.fclassM ("TransApp - fc", nameOfVal)
                    let envp = Zmap.force fc penv.envPackM ("TransApp - envp", string)
                    let fHat = Zmap.force f  penv.fHatM ("TransApp - fHat", nameOfVal)
-                   let tys = (List.map mkTyparTy envp.ep_etps) @ tys
+                   let methodTys = (List.map mkTyparTy envp.ep_etps) @ tys
                    let aenvExprs = List.map (exprForVal vm) envp.ep_aenvs
                    let args = aenvExprs @ args
-                   mkApps penv.g ((exprForVal vm fHat, fHat.Type), [tys], args, m) (* change, direct fHat call with closure (reqdTypars, aenvs) *)
+                   // realsig+ - when fHat is homed on the hosting class it is
+                   // instantiated with two type-arg groups: class-level (ep_ctps)
+                   // then method-level (ep_etps + original tys). Under realsig- the
+                   // single-group form is used, exactly as before.
+                   let tyargs =
+                       if
+                           fHoming = HostingClass
+                           && not (isNil envp.ep_ctps)
+                           && (match f.TryDeclaringEntity with
+                               | Parent tcref when not tcref.IsModuleOrNamespace -> true
+                               | _ -> false)
+                       then
+                           [List.map mkTyparTy envp.ep_ctps; methodTys]
+                       else
+                           [methodTys]
+                   mkApps penv.g ((exprForVal vm fHat, fHat.Type), tyargs, args, m) (* change, direct fHat call with closure (reqdTypars, aenvs) *)
         | _ ->
             if isNil tys && isNil args then
                 fx
