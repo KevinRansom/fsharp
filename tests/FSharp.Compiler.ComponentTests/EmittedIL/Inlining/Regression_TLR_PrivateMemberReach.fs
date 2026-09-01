@@ -89,7 +89,7 @@ let main _ =
 
         let result =
             src
-            |> compileWithFlags realsig true
+            |> compileWithFlags realsig optimize
             |> compileAndRun
             |> shouldSucceed
             |> verifyPEFileWithSystemDlls

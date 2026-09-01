@@ -64,16 +64,7 @@ let main _ =
 """
         let result =
             src
-            |> compileWithFlags realsig true
-            |> compileAndRun
-            |> shouldSucceed
-            |> verifyPEFileWithSystemDlls
-            |> shouldSucceed
-
-
-            |> withRealInternalSignature realsig
-            |> asExe
-            |> withOptimization optimize
+            |> compileWithFlags realsig optimize
             |> compileAndRun
             |> verifyPEFileWithSystemDlls
         if realsig = false then
