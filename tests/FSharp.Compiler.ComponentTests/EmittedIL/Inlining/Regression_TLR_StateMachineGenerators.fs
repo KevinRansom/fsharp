@@ -26,39 +26,12 @@ module Regression_TLR_StateMachineGenerators =
         |> withOptimization optimize
         |> ignoreWarnings
 
-    let private runAllFour realsig optimize (source: string) =
-        source
-        |> compileWithFlags realsig optimize
-        |> compileAndRun
-        |> shouldSucceed
-        |> ignore
-
     /// What: seq/task/async/seq-in-generic-method generators on a generic class run to the
     /// correct values under every realsig/optimize combination.
     /// Why: the generators capture the class tyvar 'T, so any tyvar or closure-scope slip in
     /// the generated state-machine class produces either a type error or a runtime failure.
     /// Breaks if: the state machine is emitted in a scope that cannot reach the enclosing
     /// type's members/tyvars, or the tyvar is dropped from the generated type entirely.
-    [<Theory; InlineData(true, true); InlineData(true, false); InlineData(false, true); InlineData(false, false)>]
-    let ``Seq, task and async generators on a generic class run`` (realsig: bool, optimize: bool) =
-        """
-module Sample
-open System.Threading.Tasks
-type Holder<'T>(initial: 'T) =
-    member _.Seq() = seq { yield initial }
-    member _.Gen<'U>(u: 'U) = seq { yield u }
-    member _.Task() : Task<int> = task { return 42 }
-    member _.Async() = async { return initial }
-[<EntryPoint>]
-let main _ =
-    let h = Holder(7)
-    let s = h.Seq() |> Seq.head
-    let g = h.Gen<string>("x") |> Seq.head
-    let t = h.Task().Result
-    let a = h.Async() |> Async.RunSynchronously
-    if s = 7 && g = "x" && t = 42 && a = 7 then 0 else 1
-"""
-        |> runAllFour realsig optimize
 
     /// What: IL scope lock -- the generated seq/task/async state machines must be nested
     /// inside the generic class (`Holder`1/Seq@`, `/*/Gen@`, `/*/Task@`, `/*/Async@`) and
@@ -68,9 +41,9 @@ let main _ =
     /// the contract.
     /// Breaks if: the state machine is hoisted out of the class. Manual .il.bsl capture for
     /// both realsig values belongs beside this file once the homing change lands.
-    [<Theory; InlineData(true); InlineData(false)>]
-    let ``Generators nest inside the generic class, not as module siblings`` (realsig: bool) =
-        let result =
+    [<Theory; InlineData(true, true); InlineData(true, false); InlineData(false, true); InlineData(false, false)>]
+    let ``Seq, task and async generators on a generic class run`` (realsig: bool, optimize: bool) =
+        let src =
             """
 module Sample
 open System.Threading.Tasks
@@ -79,6 +52,7 @@ type Holder<'T>(initial: 'T) =
     member _.Gen<'U>(u: 'U) = seq { yield u }
     member _.Task() : Task<int> = task { return 42 }
     member _.Async() = async { return initial }
+
 [<EntryPoint>]
 let main _ =
     let h = Holder(7)
@@ -88,10 +62,23 @@ let main _ =
     let a = h.Async() |> Async.RunSynchronously
     if s = 7 && g = "x" && t = 42 && a = 7 then 0 else 1
 """
+        let result =
+            src
             |> compileWithFlags realsig true
-            |> compile
+            |> compileAndRun
             |> shouldSucceed
             |> verifyPEFileWithSystemDlls
             |> shouldSucceed
-        result |> verifyILPresent [ "Holder`1/Seq@"; "Holder`1/Gen@"; "Holder`1/Task@"; "Holder`1/Async@" ]
-        result |> verifyILNotPresent [ "Sample/Seq@"; "Sample/'Seq@"; "Sample/Gen@"; "Sample/'Gen@"; "Sample/Task@"; "Sample/Async@" ]
+
+
+            |> withRealInternalSignature realsig
+            |> asExe
+            |> withOptimization optimize
+            |> compileAndRun
+            |> verifyPEFileWithSystemDlls
+        if realsig = false then
+            result |> verifyILPresent [ "Sample/Seq@"; "Sample/Gen@"; "Sample/Task@"; "Sample/Async@" ]
+            result |> verifyILNotPresent [ "Holder`1/Seq@"; "Holder`1/Gen@"; "Holder`1/Task@"; "Holder`1/Async@" ]
+        else
+            result |> verifyILPresent [ "Holder`1/Seq@"; "Holder`1/Gen@"; "Holder`1/Task@"; "Holder`1/Async@" ]
+            result |> verifyILNotPresent [ "Sample/Seq@"; "Sample/Gen@"; "Sample/Task@"; "Sample/Async@" ]

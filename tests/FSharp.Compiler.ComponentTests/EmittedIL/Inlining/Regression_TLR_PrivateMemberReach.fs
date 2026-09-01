@@ -45,32 +45,6 @@ module Regression_TLR_PrivateMemberReach =
     /// static, and the realsig- row must keep working via the legacy layout.
     /// Breaks if: any future routing puts the lift in a scope that cannot reach the private
     /// member, i.e. a MethodAccessException on first invocation.
-    [<Theory; InlineData(true, true); InlineData(true, false); InlineData(false, true); InlineData(false, false)>]
-    let ``Generic class member rec reaching a type-private static runs`` (realsig: bool, optimize: bool) =
-        """
-module Sample
-type Safe<'T>(mark: 'T) =
-    static let mutable stage = 0
-    static member Set v = stage <- v
-    member _.Mark = mark
-    [<NoCompilerInlining>]
-    static member private Secret() = stage + 1
-    member _.Run<'U>(u: 'U) =
-        let rec go (n: int) (acc: int) (p: 'U) =
-            if n <= 0 then acc
-            elif box p = null then acc - 1
-            else skip (n - 1) (acc + Safe<'T>.Secret()) p
-        and skip (n: int) (acc: int) (p: 'U) =
-            if n % 2 = 0 then skip (n - 1) acc p
-            else go (n - 1) acc p
-        go 1000 0 u
-[<EntryPoint>]
-let main _ =
-    let s = Safe<int>(0)
-    Safe<int>.Set 41
-    if s.Run<string>("x") = 21000 then 0 else 1
-"""
-        |> runAllFour realsig optimize
 
     /// What: IL lock for the shape above. Under --realsig+ the compiler must emit the rec
     /// as closures NESTED inside `Safe<'T>`, and never as module siblings; under --realsig-
@@ -81,8 +55,8 @@ let main _ =
     /// or --realsig- accidentally nests. When class-homing lands under --realsig+, the first
     /// branch is intended to flip from `Safe`1/go@` (nested closure) to `Safe`1::go@` (homed
     /// member static) -- update the fragment in the same PR as the codegen change.
-    [<Theory; InlineData(true); InlineData(false)>]
-    let ``Private-reach rec nests inside generic class under realsig+, lifts under realsig-`` (realsig: bool) =
+    [<Theory; InlineData(true, true); InlineData(true, false); InlineData(false, true); InlineData(false, false)>]
+    let ``Generic class member rec reaching a type-private static runs`` (realsig: bool, optimize: bool) =
         let src =
             """
 module Sample
@@ -106,7 +80,7 @@ let main _ =
     let s = Safe<int>(0)
     Safe<int>.Set 41
     if s.Run<string>("x") = 21000 then 0 else 1
-"""
+            """
         let (present, absent) =
             if realsig then
                 [ "Safe`1::go@"; "Safe`1::skip@" ], [ "Sample::go@"; "Sample::skip@" ]
@@ -116,7 +90,7 @@ let main _ =
         let result =
             src
             |> compileWithFlags realsig true
-            |> compile
+            |> compileAndRun
             |> shouldSucceed
             |> verifyPEFileWithSystemDlls
             |> shouldSucceed
