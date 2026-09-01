@@ -1,0 +1,46 @@
+Use the plan described in:
+
+.opencode/description/src/Compiler/Optimize/InnerLambdasToTopLevelFuncs-deepdive-1.md
+
+Implement ONLY the Pass1 portion of the realsig+ patch set.
+
+Work exclusively in:
+
+src/Compiler/Optimize/InnerLambdasToTopLevelFuncs.fs
+
+Always use partial paths when working with the file system
+
+WHILE WORKING, YOU MUST NARRATE YOUR PROGRESS:
+
+- Announce which structure you are searching for.
+- Report when you find the correct type or function.
+- If a search fails, report a clear error message:
+    “I could not locate 'X'. I will broaden the search.”
+- Do NOT invent new types such as TLRCandidate.
+- Do NOT modify the return type of Pass1.
+- Do NOT create new helper functions.
+
+Pass1 changes:
+
+1. Extend the value stored in `arityM` with:
+
+       homing : HomingKind
+
+   and define:
+
+       type HomingKind =
+           | HostingClass
+           | HelperClass
+
+2. After computing `fArities`, apply the realsig gate:
+
+       let fArities =
+           if g.realsig then
+               fArities |> List.map (fun (v, a) -> (v, a, HostingClass))
+           else
+               fArities |> List.map (fun (v, a) -> (v, a, HelperClass))
+
+3. Thread this new `homing` field through the Pass1 output so later passes
+   can read it.
+
+Produce a single named diff named .opencode/pass1diff.patch containing ONLY the Pass1 changes.
