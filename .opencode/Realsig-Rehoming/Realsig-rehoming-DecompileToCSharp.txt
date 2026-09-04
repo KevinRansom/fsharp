@@ -1,0 +1,372 @@
+// NestedGenericClosure, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
+// Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using Microsoft.FSharp.Collections;
+using Microsoft.FSharp.Core;
+using Microsoft.FSharp.Core.CompilerServices;
+using MyCollections;
+
+[CompilationMapping(SourceConstructFlags.Module)]
+public static class RuntimeHelpers
+{
+	[Serializable]
+	[Struct]
+	[NoComparison]
+	[NoEquality]
+	[CompilationMapping(SourceConstructFlags.ObjectType)]
+	internal struct StructBox<T>(T value)
+	{
+		[Serializable]
+		[SpecialName]
+		[StructLayout(LayoutKind.Auto, CharSet = CharSet.Auto)]
+		[CompilationMapping(SourceConstructFlags.Closure)]
+		internal sealed class get_Comparer@195(IEqualityComparer<T> gcomparer) : IEqualityComparer<StructBox<T>>
+		{
+			public IEqualityComparer<T> gcomparer = gcomparer;
+
+			int IEqualityComparer<StructBox<T>>.GetHashCode(StructBox<T> v)
+			{
+				return /*tail.*/gcomparer.GetHashCode(v.value);
+			}
+
+			bool IEqualityComparer<StructBox<T>>.Equals(StructBox<T> v1, StructBox<T> v2)
+			{
+				return /*tail.*/gcomparer.Equals(v1.value, v2.value);
+			}
+		}
+
+		internal T value = value;
+
+		public T Value => value;
+
+		public static IEqualityComparer<StructBox<T>> Comparer
+		{
+			get
+			{
+				IEqualityComparer<T> gcomparer = LanguagePrimitives.FastGenericEqualityComparerFromTable<T>();
+				return new get_Comparer@195(gcomparer);
+			}
+		}
+	}
+
+	[Serializable]
+	internal sealed class Generate@200<a, T> : FSharpFunc<Unit, IEnumerator<T>>
+	{
+		public FSharpFunc<Unit, a> openf;
+
+		public FSharpFunc<a, FSharpOption<T>> compute;
+
+		public FSharpFunc<a, Unit> closef;
+
+		[CompilerGenerated]
+		[DebuggerNonUserCode]
+		internal Generate@200(FSharpFunc<Unit, a> openf, FSharpFunc<a, FSharpOption<T>> compute, FSharpFunc<a, Unit> closef)
+		{
+			this.openf = openf;
+			this.compute = compute;
+			this.closef = closef;
+		}
+
+		public override IEnumerator<T> Invoke(Unit unitVar0)
+		{
+			return new MyCollections.IEnumerator.GeneratedEnumerable<T, a>(openf, compute, closef);
+		}
+	}
+
+	[Serializable]
+	internal sealed class EnumerateFromFunctions@205<a, b> : FSharpFunc<a, FSharpOption<b>>
+	{
+		public FSharpFunc<a, bool> moveNext;
+
+		public FSharpFunc<a, b> current;
+
+		[CompilerGenerated]
+		[DebuggerNonUserCode]
+		internal EnumerateFromFunctions@205(FSharpFunc<a, bool> moveNext, FSharpFunc<a, b> current)
+		{
+			this.moveNext = moveNext;
+			this.current = current;
+		}
+
+		public override FSharpOption<b> Invoke(a x)
+		{
+			if (moveNext.Invoke(x))
+			{
+				return FSharpOption<b>.Some(current.Invoke(x));
+			}
+			return null;
+		}
+	}
+
+	[Serializable]
+	internal sealed class EnumerateFromFunctions@206-1<a> : FSharpFunc<a, Unit>
+	{
+		internal static readonly EnumerateFromFunctions@206-1<a> @_instance = new EnumerateFromFunctions@206-1<a>();
+
+		[CompilerGenerated]
+		[DebuggerNonUserCode]
+		internal EnumerateFromFunctions@206-1()
+		{
+		}
+
+		public override Unit Invoke(a x)
+		{
+			object obj = x;
+			if (obj is IDisposable disposable)
+			{
+				IDisposable disposable2 = disposable;
+				disposable2.Dispose();
+				return null;
+			}
+			return null;
+		}
+	}
+
+	[Serializable]
+	[CompilationMapping(SourceConstructFlags.ObjectType)]
+	public interface IFinallyEnumerator
+	{
+		virtual void AppendFinallyAction(FSharpFunc<Unit, Unit> P_0);
+	}
+
+	[Serializable]
+	[Sealed]
+	[CompilationMapping(SourceConstructFlags.ObjectType)]
+	public sealed class FinallyEnumerable<T> : IEnumerable, IEnumerable<T>
+	{
+		internal FSharpFunc<Unit, IEnumerable<T>> restf;
+
+		internal FSharpFunc<Unit, Unit> compensation;
+
+		public FinallyEnumerable(FSharpFunc<Unit, Unit> compensation, FSharpFunc<Unit, IEnumerable<T>> restf)
+		{
+			this.compensation = compensation;
+			this.restf = restf;
+		}
+
+		virtual IEnumerator<T> IEnumerable<T>.GetEnumerator()
+		{
+			try
+			{
+				IEnumerator<T> enumerator = restf.Invoke(null).GetEnumerator();
+				if (enumerator is IFinallyEnumerator finallyEnumerator)
+				{
+					IFinallyEnumerator finallyEnumerator2 = finallyEnumerator;
+					finallyEnumerator2.AppendFinallyAction(compensation);
+					return enumerator;
+				}
+				return MyCollections.IEnumerator.EnumerateThenFinally(compensation, enumerator);
+			}
+			catch (object obj)
+			{
+				Exception ex = (Exception)obj;
+				compensation.Invoke(null);
+				throw;
+			}
+		}
+
+		virtual System.Collections.IEnumerator IEnumerable.GetEnumerator()
+		{
+			return ((IEnumerable<T>)this).GetEnumerator();
+		}
+	}
+
+	[Serializable]
+	[Sealed]
+	[CompilationMapping(SourceConstructFlags.ObjectType)]
+	public sealed class ConcatEnumerator<T, U> : IDisposable, System.Collections.IEnumerator, IEnumerator<T>, IFinallyEnumerator where U : IEnumerable<T>
+	{
+		internal IEnumerator<U> outerEnum;
+
+		internal IEnumerator<T> currInnerEnum;
+
+		internal bool started;
+
+		internal bool finished;
+
+		internal FSharpList<FSharpFunc<Unit, Unit>> compensations;
+
+		[DefaultValue(false)]
+		internal T currElement;
+
+		public ConcatEnumerator(IEnumerable<U> sources)
+		{
+			outerEnum = sources.GetEnumerator();
+			currInnerEnum = new MyCollections.IEnumerator.EmptyEnumerator<T>();
+			started = false;
+			finished = false;
+			compensations = FSharpList<FSharpFunc<Unit, Unit>>.Empty;
+		}
+
+		public void Finish()
+		{
+			finished = true;
+			try
+			{
+				if (currInnerEnum == null)
+				{
+					return;
+				}
+				try
+				{
+					currInnerEnum.Dispose();
+				}
+				finally
+				{
+					currInnerEnum = null;
+				}
+			}
+			finally
+			{
+				try
+				{
+					if (outerEnum != null)
+					{
+						try
+						{
+							outerEnum.Dispose();
+						}
+						finally
+						{
+							outerEnum = null;
+						}
+					}
+				}
+				finally
+				{
+					try
+					{
+						iter@272(ListModule.Reverse(compensations));
+					}
+					finally
+					{
+						compensations = FSharpList<FSharpFunc<Unit, Unit>>.Empty;
+					}
+				}
+			}
+		}
+
+		public T GetCurrent()
+		{
+			MyCollections.IEnumerator.check(started);
+			if (finished)
+			{
+				throw new InvalidOperationException("SR.GetString(SR.enumerationAlreadyFinished)");
+			}
+			return currElement;
+		}
+
+		virtual void IFinallyEnumerator.AppendFinallyAction(FSharpFunc<Unit, Unit> f)
+		{
+			compensations = FSharpList<FSharpFunc<Unit, Unit>>.Cons(f, compensations);
+		}
+
+		[SpecialName]
+		virtual T IEnumerator<T>.get_Current()
+		{
+			return GetCurrent();
+		}
+
+		[SpecialName]
+		virtual object System.Collections.IEnumerator.get_Current()
+		{
+			return GetCurrent();
+		}
+
+		[DebuggerStepThrough]
+		virtual bool System.Collections.IEnumerator.MoveNext()
+		{
+			if (!started)
+			{
+				started = true;
+			}
+			if (finished)
+			{
+				return false;
+			}
+			return /*tail.*/takeInner@301(this, null);
+		}
+
+		virtual void System.Collections.IEnumerator.Reset()
+		{
+			throw new NotSupportedException("SR.GetString(SR.resetNotSupported)");
+		}
+
+		[DebuggerStepThrough]
+		virtual void IDisposable.Dispose()
+		{
+			if (!finished)
+			{
+				Finish();
+			}
+		}
+	}
+
+	[CompilationArgumentCounts(new int[] { 1, 1, 1 })]
+	public static IEnumerable<T> Generate<a, T>(FSharpFunc<Unit, a> openf, FSharpFunc<a, FSharpOption<T>> compute, FSharpFunc<a, Unit> closef)
+	{
+		return MyCollections.IEnumerator.mkSeq(new Generate@200<a, T>(openf, compute, closef));
+	}
+
+	[CompilationArgumentCounts(new int[] { 1, 1, 1 })]
+	public static IEnumerable<b> EnumerateFromFunctions<a, b>(FSharpFunc<Unit, a> create, FSharpFunc<a, bool> moveNext, FSharpFunc<a, b> current)
+	{
+		return Generate(create, new EnumerateFromFunctions@205<a, b>(moveNext, current), EnumerateFromFunctions@206-1<a>.@_instance);
+	}
+
+	internal static void iter@272(FSharpList<FSharpFunc<Unit, Unit>> comps)
+	{
+		if (comps.TailOrNull == null)
+		{
+			return;
+		}
+		FSharpList<FSharpFunc<Unit, Unit>> tailOrNull = comps.TailOrNull;
+		FSharpFunc<Unit, Unit> headOrDefault = comps.HeadOrDefault;
+		try
+		{
+			headOrDefault.Invoke(null);
+		}
+		finally
+		{
+			iter@272(tailOrNull);
+		}
+	}
+
+	internal static bool takeOuter@308<T, U>(ConcatEnumerator<T, U> x, Unit unitVar0) where U : IEnumerable<T>
+	{
+		while (x.outerEnum.MoveNext())
+		{
+			U current = x.outerEnum.Current;
+			object obj = current;
+			if (obj is MyCollections.IEnumerator.EmptyEnumerable<T>)
+			{
+				ConcatEnumerator<T, U> concatEnumerator = x;
+				unitVar0 = null;
+				x = concatEnumerator;
+				continue;
+			}
+			x.currInnerEnum.Dispose();
+			ConcatEnumerator<T, U> concatEnumerator2 = x;
+			U val = current;
+			concatEnumerator2.currInnerEnum = val.GetEnumerator();
+			return /*tail.*/takeInner@301(x, null);
+		}
+		x.Finish();
+		return false;
+	}
+
+	internal static bool takeInner@301<T, U>(ConcatEnumerator<T, U> x, Unit unitVar0) where U : IEnumerable<T>
+	{
+		if (x.currInnerEnum.MoveNext())
+		{
+			x.currElement = x.currInnerEnum.Current;
+			return true;
+		}
+		return /*tail.*/takeOuter@308(x, null);
+	}
+}

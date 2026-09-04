@@ -1,0 +1,140 @@
+
+# ? **General Engineering Prompt for Qwen (Feature?Completion Version)**  
+### *(Use this after restarting VS Code — this is NOT test?specific)*
+
+```
+You are an expert F# compiler engineer.
+
+Your task is to complete the implementation of the **realsig rehoming feature**.
+
+This is NOT a test?fixing task.  
+This is a feature?completion task.
+
+============================================================
+## FEATURE CONTEXT (from the deep?dives)
+============================================================
+
+The realsig rehoming feature is fully specified in:
+
+- C:\kevinransom\fsharp\.opencode\Realsig-Rehoming\InnerLambdasToTopLevelFuncs-deepdive-1.md
+- - C:\kevinransom\fsharp\.opencode\Realsig-Rehoming\InnerLambdasToTopLevelFuncs-deepdive-2.md
+
+The design intent is:
+
+### **Under realsig=true, any inner lambda lifted by TLR must be homed on its hosting generic class.**
+
+Specifically:
+
+- The hosting class’s type parameters (ctps) must be treated as **class-level**.
+- The lifted function (fHat) must be emitted as a **static method on the hosting class**.
+- The method must have **no method-level type parameters** of its own.
+- The class’s type parameters must appear as **class-level typars** in IL.
+- The TLR type?argument split (ep_ctps @ methodTps) must be respected by IlxGen.
+
+This is the intended architecture.
+
+============================================================
+## WHAT CURRENTLY WORKS
+============================================================
+
+### optimize- (no TLR)
+- realsig- ? closure classes homed on the module
+- realsig+ ? closure classes correctly homed on the hosting generic class
+
+### optimize+ (TLR runs)
+- realsig- ? lifted static methods correctly homed on the module
+
+These behaviors must remain correct.
+
+============================================================
+## WHAT IS CURRENTLY MISSING
+============================================================
+
+Under **realsig+ optimize+**, the TLR-lifted functions (fHat) are:
+
+- created with ParentNone
+- not marked as members
+- treated as top-level values
+- routed by IlxGen to moduleCloc via:
+
+    // TLR lifts avoid generic enclosing scopes (#17607); namespace-root lifts use the per-file
+    // init class to avoid generated-name collisions in the shared <PrivateImplementationDetails$Asm>.
+    let effectiveCloc =
+        if v.IsCompiledAsTopLevel && not v.IsMemberOrModuleBinding then
+            if eenv.moduleCloc.Enclosing.IsEmpty then
+                CompLocForInitClass eenv.moduleCloc
+            else
+                eenv.moduleCloc
+        else
+            cloc
+
+This causes:
+
+- fHat to be emitted as a module-level static method
+- class typars to be treated as method typars
+- the hosting class to be ignored
+- the realsig type?argument split to be lost
+
+This is the missing part of the feature.
+
+============================================================
+## YOUR ENGINEERING TASK
+============================================================
+
+Your task is to **complete the realsig rehoming feature** by ensuring:
+
+### 1. InnerLambdasToTopLevelFuncs.fs  
+Correctly sets or records the hosting class information for fHat under realsig=true.
+
+### 2. IlxGen.fs  
+Correctly uses the hosting class information to:
+
+- place fHat as a static method on the hosting generic class
+- treat the hosting class’s type parameters as class-level typars
+- lop off class typars from fHat’s method-level typars
+- emit the correct IL shape for realsig+ optimize+
+
+You must ensure:
+
+- realsig- optimize+ continues to home fHat on the module
+- realsig+ optimize- continues to use closure classes
+- realsig+ optimize+ uses class-level static methods
+- no other compiler behavior is changed
+
+============================================================
+## DISCIPLINE (DO NOT DRIFT)
+============================================================
+
+Do NOT re-read unrelated compiler subsystems.  
+Do NOT re-derive closure class behavior.  
+Do NOT re-derive the entire TLR pipeline.  
+Do NOT re-derive the entire IlxGen pipeline.  
+Do NOT review test cases.  
+Do NOT broaden the scope.
+
+Focus ONLY on:
+
+- InnerLambdasToTopLevelFuncs.fs  
+- IlxGen.fs  
+- hosting class propagation  
+- homing logic  
+- class typar lopping
+
+============================================================
+## REQUIRED OUTPUT
+============================================================
+
+Produce:
+
+1. The exact file(s) and function(s) where hosting class information must be propagated.
+2. The exact file(s) and function(s) where IlxGen must use hosting class information.
+3. The minimal patch (diff format) that:
+   - propagates hosting class info under realsig=true
+   - uses hosting class info in IlxGen
+   - emits fHat as a static method on the hosting class
+   - treats ctps as class-level typars
+   - preserves all existing behaviors in other quadrants
+4. A short explanation of why the patch is correct.
+
+Output ONLY the engineering analysis and patch.
+```
