@@ -360,12 +360,12 @@ Agents may occasionally need to compile a **single `.fs` file** to validate IL o
 
 **Example:**
 ```
-artifacts\bin\fsc\Release\net472\fsc.exe --nologo tests\FSharp.Compiler.ComponentTests\EmittedIL\RealInternalSignature\nested_generic_closure.fs --realsig+ --optimize+ --out:artifacts\Temp\RealsigPlusOptimise+.exe
+artifacts\bin\fsc\Release\net472\fsc.exe --nologo tests\FSharp.Compiler.ComponentTests\EmittedIL\RealInternalSignature\nested_generic_closure.fs --realsig+ --optimize+ --out:artifacts\Temp\RealsigPlusOptimisePlus.exe
 ```
 
 **Example output file:**
 ```
-09/02/2026  10:07 PM            23,552 RealsigPlusOptimise+.exe
+09/02/2026  10:07 PM            23,552 RealsigPlusOptimisePlus.exe
 ```
 
 **Notes:**

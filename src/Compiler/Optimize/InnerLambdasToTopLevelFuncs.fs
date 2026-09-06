@@ -568,26 +568,15 @@ module Pass2_DetermineReqdItems =
              let fclass = BindingGroupSharingSameReqdItems tlrBs
              // what determines env?
              let frees = FreeInBindings tlrBs
-             // realsig+ - ambient class typars of the enclosing host, gathered across the group
-             let ambientCtps0 =
-                 tlrBs
-                 |> List.map (fun b ->
-                     match b.Var.TryDeclaringEntity with
-                     | Parent tcref when not tcref.IsModuleOrNamespace -> tcref.Typars
-                     | _ -> [])
-                 |> List.collect id
-                 |> Zset.ofList typarOrder
-             // realsig+ - split class-typars (ctps) out of the free typars
-             let freeTypars0 = frees.FreeTyvars.FreeTypars
-             let ctpsUsed    = Zset.inter freeTypars0 ambientCtps0
-             let reqdTypars0 = Zset.diff freeTypars0 ctpsUsed |> Zset.elements
+             // put in env (realsig: free typars carried by the env pack; closures declare no entity)
+             let reqdTypars0 = frees.FreeTyvars.FreeTypars |> Zset.elements
              // occurrences contribute to env
              let reqdVals0 = frees.FreeLocals |> Zset.elements
              // tlrBs are not reqdVals0 for themselves
              let reqdVals0 = reqdVals0 |> List.filter (fclass.Contains >> not)
              let reqdVals0 = reqdVals0 |> Zset.ofList valOrder
              // collect into env over bodies
-             let z = PushFrame fclass (reqdTypars0, ctpsUsed, reqdVals0, m) z
+             let z = PushFrame fclass (reqdTypars0, Zset.empty typarOrder, reqdVals0, m) z
              let z = (z, tlrBs) ||> List.fold (foldOn (fun b -> b.Expr) recurseF)
              let z = SaveFrame fclass z
              // for bindings not marked TRL, collect
@@ -898,12 +887,7 @@ let CreateNewValuesForTLR (scope: PerFileNamingScope) g tlrS arityM fclassM envP
         // (ep_ctps) are placed ahead of the method-level ones, so that the wrapper and
         // call sites can be rewritten as two type-arg groups (class; method).
         // Under realsig- every typar is a method typar and ep_ctps is ignored here.
-        let realsigCtpSplit =
-            homing = HostingClass
-            && not (isNil envp.ep_ctps)
-            && (match f.TryDeclaringEntity with
-                | Parent tcref when not tcref.IsModuleOrNamespace -> true
-                | _ -> false)
+        let realsigCtpSplit = homing = HostingClass && not (isNil envp.ep_ctps)
 
         let fHatTps = if realsigCtpSplit then envp.ep_ctps @ methodTps else methodTps
 
@@ -1076,9 +1060,6 @@ module Pass4_RewriteAssembly =
                 if
                     fHoming = HostingClass
                     && not (isNil envp.ep_ctps)
-                    && (match fOrig.TryDeclaringEntity with
-                        | Parent tcref when not tcref.IsModuleOrNamespace -> true
-                        | _ -> false)
                 then
                     [List.map mkTyparTy envp.ep_ctps; methodArgs]
                 else
@@ -1117,9 +1098,6 @@ module Pass4_RewriteAssembly =
                 if
                     homing = HostingClass
                     && not (isNil envp.ep_ctps)
-                    && (match f.TryDeclaringEntity with
-                        | Parent tcref when not tcref.IsModuleOrNamespace -> true
-                        | _ -> false)
                 then
                     envp.ep_ctps @ methodTps
                 else
@@ -1200,9 +1178,6 @@ module Pass4_RewriteAssembly =
                        if
                            fHoming = HostingClass
                            && not (isNil envp.ep_ctps)
-                           && (match f.TryDeclaringEntity with
-                               | Parent tcref when not tcref.IsModuleOrNamespace -> true
-                               | _ -> false)
                        then
                            [List.map mkTyparTy envp.ep_ctps; methodTys]
                        else
