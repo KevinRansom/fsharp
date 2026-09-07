@@ -328,6 +328,38 @@ namespace Microsoft.FSharp.Core.CompilerServices
 
                 member _.Reset() = IEnumerator.noReset()
 
+            member x.GenericMoveNext<'M>(m: 'M) =
+                   if not started then started <- true
+                   if finished then false
+                   else
+                      let rec genericTakeInner () =
+                        // check the inner list
+                        if currInnerEnum.MoveNext() then
+                            x.currElement <- currInnerEnum.Current
+                            true
+                        else
+                            // check the outer list
+                            let rec genericTakeOuter() =
+                                if outerEnum.MoveNext() then
+                                    let ie = outerEnum.Current
+                                    // Optimization to detect the statically-allocated empty IEnumerables
+                                    match box ie with
+                                    | :? EmptyEnumerable<'T> ->
+                                         // This one is empty, just skip, don't call GetEnumerator, try again
+                                         genericTakeOuter()
+                                    | _ ->
+                                         // OK, this one may not be empty.
+                                         // Don't forget to dispose of the enumerator for the inner list now we're done with it
+                                         currInnerEnum.Dispose()
+                                         currInnerEnum <- ie.GetEnumerator()
+                                         genericTakeInner ()
+                                else
+                                    // We're done
+                                    x.Finish()
+                                    false
+                            genericTakeOuter()
+                      genericTakeInner ()
+
             interface System.IDisposable with
 
                 [<DebuggerStepThrough>]
@@ -346,4 +378,11 @@ namespace Microsoft.FSharp.Core.CompilerServices
             if enumerator.MoveNext() then
                 printfn $"{enumerator.Current}"
                 loop ()
+
+        let concatEnumerator = new RuntimeHelpers.ConcatEnumerator<_,_>(x)
+        let ce = new RuntimeHelpers.ConcatEnumerator<_,_>(x) :> IEnumerator
+        if concatEnumerator.GenericMoveNext<int>(42) then
+            printfn $"{ce.Current}"
+            loop ()
+
         loop ()
