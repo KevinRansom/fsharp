@@ -195,8 +195,90 @@ let IsMandatoryNonTopLevel g (f: Val) =
     byrefVal
 
 //-------------------------------------------------------------------------
-// pass1: decide which f are to be TLR? and if so, arity(f)
+// pass1: compute the real 'declaring class' for every local `Val` bound
+//        by a `let` / `let rec` lexically inside an F# class member body.
+//        (Part 1 of the `--realsig+` inner-lambda re-homing optimisation.)
 //-------------------------------------------------------------------------
+//
+// F# class members (constructors, instance or static members) are stored,
+// in the TAST, as `ModuleOrNamespaceBinding.Binding (TBind(m, body))` in
+// the `bindings` list of the `TMDefRec` that declares the class `t`.  The
+// member `Val` `m` has `m.TryDeclaringEntity = Parent tcrefOf t`, and
+// `body` is the member's expression.  Locals that appear lexically inside
+// `body` (e.g. `let rec f () = ...`) are *separate* `Val`s whose
+// `DeclaringEntity` is `ParentNone` — the information about which class
+// they are lexically inside is therefore NOT recoverable from the `Val`
+// itself.  (This is also why we cannot put the answer on the `Val`: it
+// would change the pickled representation, which we must not do.)
+//
+// The function below walks the `CheckedImplFile` and builds, for each
+// local `Val` found inside a member body, a mapping from the `Val` to the
+// class `Tycon`.  Module-level `let`s are NOT included (they are not
+// "inside" any class).  Locals inside a nested class nested in a module
+// are included (mapped to the innermost class).  Locals inside a module
+// nested inside a class are NOT included (the enclosing class does not
+// lexically own them).
+let InnerLambdaDeclaringTyconsOf (expr: CheckedImplFile) : Zmap<Val, Tycon> =
+    // A `Val` is "local" (a candidate to record) only if it is not a
+    // class member and not a module / static binding.  Such vals are
+    // exactly the ones TLR is interested in re-homing.
+    let isLocalVal (v: Val) : bool =
+        (not v.HasDeclaringEntity) && (not v.IsMemberOrModuleBinding)
+
+    // Collect every local `Val` bound lexically inside `e`, mapping it to
+    // `owner` (the class `Tycon` whose member body is being walked).  We
+    // reuse the compiler's `ExprFolder` so that nesting under matches,
+    // applications, ops, sequences, etc. is all covered; this is exactly the
+    // machinery the existing `BodyReferencesTypeScopedPrivate` and the TLR
+    // pass already rely on to reach local bindings inside a member body.
+    let collectBodyLocals owner (e: Expr) acc =
+        let folders =
+            { ExprFolder0 with
+                nonRecBindingsIntercept =
+                    (fun acc b -> if isLocalVal b.Var then Zmap.add b.Var owner acc else acc)
+                recBindingsIntercept =
+                    (fun acc binds -> binds |> List.fold (fun acc2 b -> if isLocalVal b.Var then Zmap.add b.Var owner acc2 else acc2) acc) }
+        FoldExpr folders acc e
+
+    // `Tycon` (i.e. `Entity`) is `NoEquality; NoComparison`, so we compare
+    // by the unique `Stamp` assigned to each entity (same approach as the
+    // existing `valOrder` comparer used elsewhere in this file).
+    let isSameTycon (a: Tycon) (b: Tycon) = a.Stamp = b.Stamp
+
+    let rec walkContents (x: ModuleOrNamespaceContents) acc =
+        match x with
+        | ModuleOrNamespaceContents.TMDefs defs ->
+            defs |> List.fold (fun a d -> walkContents d a) acc
+        | ModuleOrNamespaceContents.TMDefOpens _ -> acc
+        | ModuleOrNamespaceContents.TMDefLet (_, _) -> acc
+        | ModuleOrNamespaceContents.TMDefDo (_, _) -> acc
+        | ModuleOrNamespaceContents.TMDefRec (_, _, tycons, bindings, _) ->
+            // For each class `tycon` in `tycons`, look for the member
+            // bindings that belong to `tycon` in `bindings`, and walk their
+            // bodies recording every local `let`/`let rec` binding inside.
+            bindings
+            |> List.fold (fun a mb ->
+                match mb with
+                | ModuleOrNamespaceBinding.Binding b ->
+                    // Determine the owner class of this member binding.
+                    let owner =
+                        match b.Var.TryDeclaringEntity with
+                        | Parent tcref ->
+                            let t = tcref.Deref
+                            if tycons |> List.exists (isSameTycon t) then Some t else None
+                        | ParentNone -> None
+                    // Walk the member body, recording locals.
+                    match owner with
+                    | Some t -> collectBodyLocals t b.Expr a
+                    | None -> a
+                | ModuleOrNamespaceBinding.Module (_, nested) ->
+                    // Recurse into the nested module.  Locals inside a
+                    // nested module are NOT members of any class in `tycons`
+                    // (a module is not a class); skip them.
+                    walkContents nested a
+                ) acc
+
+    walkContents expr.Contents (Zmap.empty valOrder)
 
 module Pass1_DetermineTLRAndArities =
 
@@ -250,30 +332,40 @@ module Pass1_DetermineTLRAndArities =
         let dump f n = dprintf "tlr: arity %50s = %d\n" (showL (valL f)) n
         Zmap.iter dump arityM
 
-    let DetermineTLRAndArities amap g expr =
-       let xinfo = GetUsageInfoOfImplFile g expr
-       let fArities = Zmap.chooseL (SelectTLRVals amap g xinfo) xinfo.Defns
-       let fArities = List.filter (fst >> IsValueRecursionFree xinfo) fArities
-       // Do not TLR v if it is bound under a shouldinline defn
-       // There is simply no point - the original value will be duplicated and TLR'd anyway
-       let rejectS = GetValsBoundUnderShouldInline xinfo
-       let fArities = List.filter (fun (v, _) -> not (Zset.contains v rejectS)) fArities
-       (*-*)
-       let tlrS = Zset.ofList valOrder (List.map fst fArities)
-       let topValS = xinfo.TopLevelBindings                                 (* genuinely top level *)
-       let topValS = Zset.filter (IsMandatoryNonTopLevel g >> not) topValS  (* restrict *)
+    let DetermineTLRAndArities amap g expr (declaringTyconM: Zmap<Val, Tycon>) =
+        ignore declaringTyconM
+        let xinfo = GetUsageInfoOfImplFile g expr
+        let fArities = Zmap.chooseL (SelectTLRVals amap g xinfo) xinfo.Defns
+        let fArities = List.filter (fst >> IsValueRecursionFree xinfo) fArities
+        // Do not TLR v if it is bound under a shouldinline defn
+        // There is simply no point - the original value will be duplicated and TLR'd anyway
+        let rejectS = GetValsBoundUnderShouldInline xinfo
+        let fArities = List.filter (fun (v, _) -> not (Zset.contains v rejectS)) fArities
+        (*-*)
+        let tlrS = Zset.ofList valOrder (List.map fst fArities)
+        let topValS = xinfo.TopLevelBindings                                 (* genuinely top level *)
+        let topValS = Zset.filter (IsMandatoryNonTopLevel g >> not) topValS  (* restrict *)
 #if DEBUG
-       (* REPORT MISSED CASES *)
-       if verboseTLR then
-           let missed = Zset.diff  xinfo.TopLevelBindings tlrS
-           missed |> Zset.iter (fun v -> dprintf "TopLevel but not TLR = %s\n" v.LogicalName)
-       (* REPORT OVER *)
+        (* REPORT MISSED CASES *)
+        if verboseTLR then
+            let missed = Zset.diff  xinfo.TopLevelBindings tlrS
+            missed |> Zset.iter (fun v -> dprintf "TopLevel but not TLR = %s\n" v.LogicalName)
+        // Part 1 (realsig+ re-homing) verification: confirm the declaring-class
+        // info threaded in actually covers every TLR val that is a local inner
+        // lambda, and surface the class + ambient typars part 2 will use.
+        if verboseTLR then
+            Zset.iter (fun v ->
+                match Zmap.tryFind v declaringTyconM with
+                | Some t ->
+                    let tp = String.concat "," (List.map (fun (tp: Typar) -> tp.Name) t.Typars)
+                    dprintf "TLR re-homing: %s -> %s <%s>\n" v.LogicalName t.LogicalName tp
+                | None -> dprintf "TLR re-homing: %s -> (module/top-level, no class)\n" v.LogicalName) tlrS
 #endif
-       let arityM = Zmap.ofList valOrder fArities
+        let arityM = Zmap.ofList valOrder fArities
 #if DEBUG
-       if verboseTLR then DumpArity arityM
+        if verboseTLR then DumpArity arityM
 #endif
-       tlrS, topValS, arityM
+        tlrS, topValS, arityM
 
 (* NOTES:
    For constants,
@@ -1383,20 +1475,28 @@ let RecreateUniqueBounds g expr =
 //-------------------------------------------------------------------------
 
 let MakeTopLevelRepresentationDecisions amap (scope: PerFileNamingScope) ccu g expr =
-   try
-      // pass1: choose the f to be TLR with arity(f)
-      let tlrS, topValS, arityM = Pass1_DetermineTLRAndArities.DetermineTLRAndArities amap g expr
+    // Part 1 of the --realsig+ inner-lambda re-homing optimisation: compute,
+    // up front, the real "declaring class" for every local `Val` bound lexically
+    // inside an F# class member body of the input file.  This map is NOT
+    // pickled (see comment on `InnerLambdaDeclaringTyconsOf` in the .fsi); it is
+    // passed through the pass pipeline as a value so that part 2 can consult it
+    // when deciding how to re-home each TLR'd inner lambda.
+    let innerLambdaDeclaringTyconsM = InnerLambdaDeclaringTyconsOf expr
+    try
+       // pass1: choose the f to be TLR with arity(f).  The (part-1, non-pickled)
+       // declaring-class map is threaded through so part 2 can verify/re-home.
+       let tlrS, topValS, arityM = Pass1_DetermineTLRAndArities.DetermineTLRAndArities amap g expr innerLambdaDeclaringTyconsM
 
-      // pass2: determine the typar/freevar closures, f->fclass and fclass declist
-      let reqdItemsMap, fclassM, declist, recShortCallS = Pass2_DetermineReqdItems.DetermineReqdItems (tlrS, arityM) expr
+       // pass2: determine the typar/freevar closures, f->fclass and fclass declist
+       let reqdItemsMap, fclassM, declist, recShortCallS = Pass2_DetermineReqdItems.DetermineReqdItems (tlrS, arityM) expr
 
-      // pass3
-      let envPackM = ChooseReqdItemPackings g fclassM topValS  declist reqdItemsMap
-      let fHatM = CreateNewValuesForTLR scope g tlrS arityM fclassM envPackM
+       // pass3
+       let envPackM = ChooseReqdItemPackings g fclassM topValS  declist reqdItemsMap
+       let fHatM = CreateNewValuesForTLR scope g tlrS arityM fclassM envPackM
 
-      // pass4: rewrite
-      if verboseTLR then dprintf "TransExpr(rw)------\n"
-      let expr, _ =
+       // pass4: rewrite
+       if verboseTLR then dprintf "TransExpr(rw)------\n"
+       let expr, _ =
           let penv: Pass4_RewriteAssembly.RewriteContext =
               { ccu = ccu
                 g = g
@@ -1411,14 +1511,15 @@ let MakeTopLevelRepresentationDecisions amap (scope: PerFileNamingScope) ccu g e
           let z = Pass4_RewriteAssembly.rewriteState0
           Pass4_RewriteAssembly.TransImplFile penv z expr
 
-      // pass5: copyExpr to restore "each bound is unique" property
-      // aka, copyExpr
-      if verboseTLR then dprintf "copyExpr------\n"
-      let expr = RecreateUniqueBounds g expr
-      if verboseTLR then dprintf "TLR-done------\n"
+       // pass5: copyExpr to restore "each bound is unique" property
+       // aka, copyExpr
+       if verboseTLR then dprintf "copyExpr------\n"
+       let expr = RecreateUniqueBounds g expr
+       if verboseTLR then dprintf "TLR-done------\n"
 
-      expr
-
-   with AbortTLR m ->
-       warning(Error(FSComp.SR.tlrLambdaLiftingOptimizationsNotApplied(), m))
        expr
+
+    with AbortTLR m ->
+        warning(Error(FSComp.SR.tlrLambdaLiftingOptimizationsNotApplied(), m))
+        expr
+
