@@ -182,15 +182,6 @@ build.cmd -testAOT -c Release
 build.cmd -testAll -c Release
 ```
 
-=============================================
-
-
-
-=============================================
-
-
-
-
 Notes:
 - **`-c Release` is effectively required** for most test groups. Running on
   the default `Debug` can cause `StackOverflowException` or other odd
@@ -200,6 +191,25 @@ Notes:
 - `-ci -nobl` (or `-ci -bl`) is mandatory for some test groups (Cambridge,
   some integration, etc.); `-nobl` disables binary log output.
 - `-norestore` skips NuGet restore (speedup).
+
+
+
+Development build:
+
+On windows the most reliable way to build the product is to use the command line, 
+
+	.\build.cmd -c release
+or 
+	.\build.cmd -c debug
+
+in bash it is:
+	.\build.sh -c release
+or
+	.\build.sh -c release
+
+build.cmd and build.sh ensure the environment is up to date and correct for to build product.
+Not using them is quite risky.  If it fails and the failure isn't because of an introduced code change.
+Stop and ask for assistance I will fix the environment issue you are encountering or explain why it is correct.
 
 ### Test infrastructure (xUnit v3 / MTP)
 
