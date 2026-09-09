@@ -280,6 +280,10 @@ let InnerLambdaDeclaringTyconsOf (expr: CheckedImplFile) : Zmap<Val, Tycon> =
 
     walkContents expr.Contents (Zmap.empty valOrder)
 
+type HomingKind =
+    | HostingClass
+    | HelperClass
+
 module Pass1_DetermineTLRAndArities =
 
     let GetMaxNumArgsAtUses xinfo f =
@@ -329,43 +333,40 @@ module Pass1_DetermineTLRAndArities =
         not isRecursive || List.forall hasDelayedRepr mudefs
 
     let DumpArity arityM =
-        let dump f n = dprintf "tlr: arity %50s = %d\n" (showL (valL f)) n
+        let dump f (n, _homing) = dprintf "tlr: arity %50s = %d\n" (showL (valL f)) n
         Zmap.iter dump arityM
 
     let DetermineTLRAndArities amap g expr (declaringTyconM: Zmap<Val, Tycon>) =
-        ignore declaringTyconM
-        let xinfo = GetUsageInfoOfImplFile g expr
-        let fArities = Zmap.chooseL (SelectTLRVals amap g xinfo) xinfo.Defns
-        let fArities = List.filter (fst >> IsValueRecursionFree xinfo) fArities
-        // Do not TLR v if it is bound under a shouldinline defn
-        // There is simply no point - the original value will be duplicated and TLR'd anyway
-        let rejectS = GetValsBoundUnderShouldInline xinfo
-        let fArities = List.filter (fun (v, _) -> not (Zset.contains v rejectS)) fArities
-        (*-*)
-        let tlrS = Zset.ofList valOrder (List.map fst fArities)
-        let topValS = xinfo.TopLevelBindings                                 (* genuinely top level *)
-        let topValS = Zset.filter (IsMandatoryNonTopLevel g >> not) topValS  (* restrict *)
+       ignore declaringTyconM
+       let xinfo = GetUsageInfoOfImplFile g expr
+       let fArities = Zmap.chooseL (SelectTLRVals amap g xinfo) xinfo.Defns
+       let fArities = List.filter (fst >> IsValueRecursionFree xinfo) fArities
+       // Do not TLR v if it is bound under a shouldinline defn
+       // There is simply no point - the original value will be duplicated and TLR'd anyway
+       let rejectS = GetValsBoundUnderShouldInline xinfo
+       let fArities = List.filter (fun (v, _) -> not (Zset.contains v rejectS)) fArities
+       // realsig gate: decide where each TLR function is homed
+       let fArities =
+           if g.realsig then
+               fArities |> List.map (fun (v, a) -> (v, a, HostingClass))
+           else
+               fArities |> List.map (fun (v, a) -> (v, a, HelperClass))
+       (*-*)
+       let tlrS = Zset.ofList valOrder (fArities |> List.map (fun (v, _, _) -> v))
+       let topValS = xinfo.TopLevelBindings                                 (* genuinely top level *)
+       let topValS = Zset.filter (IsMandatoryNonTopLevel g >> not) topValS  (* restrict *)
 #if DEBUG
-        (* REPORT MISSED CASES *)
-        if verboseTLR then
-            let missed = Zset.diff  xinfo.TopLevelBindings tlrS
-            missed |> Zset.iter (fun v -> dprintf "TopLevel but not TLR = %s\n" v.LogicalName)
-        // Part 1 (realsig+ re-homing) verification: confirm the declaring-class
-        // info threaded in actually covers every TLR val that is a local inner
-        // lambda, and surface the class + ambient typars part 2 will use.
-        if verboseTLR then
-            Zset.iter (fun v ->
-                match Zmap.tryFind v declaringTyconM with
-                | Some t ->
-                    let tp = String.concat "," (List.map (fun (tp: Typar) -> tp.Name) t.Typars)
-                    dprintf "TLR re-homing: %s -> %s <%s>\n" v.LogicalName t.LogicalName tp
-                | None -> dprintf "TLR re-homing: %s -> (module/top-level, no class)\n" v.LogicalName) tlrS
+       (* REPORT MISSED CASES *)
+       if verboseTLR then
+           let missed = Zset.diff  xinfo.TopLevelBindings tlrS
+           missed |> Zset.iter (fun v -> dprintf "TopLevel but not TLR = %s\n" v.LogicalName)
+       (* REPORT OVER *)
 #endif
-        let arityM = Zmap.ofList valOrder fArities
+       let arityM = Zmap.ofList valOrder (fArities |> List.map (fun (v, a, h) -> (v, (a, h))))
 #if DEBUG
-        if verboseTLR then DumpArity arityM
+       if verboseTLR then DumpArity arityM
 #endif
-        tlrS, topValS, arityM
+       tlrS, topValS, arityM
 
 (* NOTES:
    For constants,
@@ -466,9 +467,10 @@ let reqdItemOrder =
 /// The reqdTypars   are the free reqdTypars of the defns, and those required by any direct TLR arity-met calls.
 /// The reqdItems are the ids/subEnvs required from calls to freeVars.
 type ReqdItemsForDefn =
-    { 
+    {
         reqdTypars: Zset<Typar>
         reqdItems: Zset<ReqdItem>
+        ctps: Zset<Typar>
         m: range
     }
 
@@ -481,9 +483,10 @@ type ReqdItemsForDefn =
                reqdTypars = Zset.addList typars env.reqdTypars
                reqdItems = Zset.addList items  env.reqdItems}
 
-    static member Initial typars m =
+    static member Initial (typars, ctps, m) =
         {reqdTypars = Zset.addList typars  (Zset.empty typarOrder)
          reqdItems = Zset.empty reqdItemOrder
+         ctps = ctps
          m = m }
 
     override env.ToString() =
@@ -566,13 +569,13 @@ module Pass2_DetermineReqdItems =
           recShortCallS = Zset.empty valOrder }
 
     /// PUSH = start collecting for fclass
-    let PushFrame (fclass: BindingGroupSharingSameReqdItems) (reqdTypars0, reqdVals0, m) state =
+    let PushFrame (fclass: BindingGroupSharingSameReqdItems) (reqdTypars0, ctps, reqdVals0, m) state =
         if fclass.IsEmpty then
             state
         else
           {state with
                revDeclist = fclass :: state.revDeclist
-               stack = (let env = ReqdItemsForDefn.Initial reqdTypars0 m in (fclass, reqdVals0, env) :: state.stack) }
+               stack = (let env = ReqdItemsForDefn.Initial (reqdTypars0, ctps, m) in (fclass, reqdVals0, env) :: state.stack) }
 
     /// POP & SAVE = end collecting for fclass and store
     let SaveFrame     (fclass: BindingGroupSharingSameReqdItems) state =
@@ -626,7 +629,7 @@ module Pass2_DetermineReqdItems =
              let f = fvref.Deref
              match Zmap.tryFind f arityM with
 
-             | Some wf ->
+             | Some (wf, _homing) ->
                  // f is TLR with arity wf
                  if IsArityMet fvref wf tps args then
                      // arity-met call to a TLR g
@@ -648,16 +651,27 @@ module Pass2_DetermineReqdItems =
              let fclass = BindingGroupSharingSameReqdItems tlrBs
              // what determines env?
              let frees = FreeInBindings tlrBs
-             // put in env
-             let reqdTypars0 = frees.FreeTyvars.FreeTypars |> Zset.elements     
-             // occurrences contribute to env 
+             // realsig+ - ambient class typars of the enclosing host, gathered across the group
+             let ambientCtps0 =
+                 tlrBs
+                 |> List.map (fun b ->
+                     match b.Var.TryDeclaringEntity with
+                     | Parent tcref when not tcref.IsModuleOrNamespace -> tcref.Typars
+                     | _ -> [])
+                 |> List.collect id
+                 |> Zset.ofList typarOrder
+             // realsig+ - split class-typars (ctps) out of the free typars
+             let freeTypars0 = frees.FreeTyvars.FreeTypars
+             let ctpsUsed    = Zset.inter freeTypars0 ambientCtps0
+             let reqdTypars0 = Zset.diff freeTypars0 ctpsUsed |> Zset.elements
+             // occurrences contribute to env
              let reqdVals0 = frees.FreeLocals |> Zset.elements
-             // tlrBs are not reqdVals0 for themselves 
-             let reqdVals0 = reqdVals0 |> List.filter (fclass.Contains >> not) 
-             let reqdVals0 = reqdVals0 |> Zset.ofList valOrder 
-             // collect into env over bodies 
-             let z = PushFrame fclass (reqdTypars0, reqdVals0,m) z
-             let z = (z, tlrBs) ||> List.fold (foldOn (fun b -> b.Expr) recurseF) 
+             // tlrBs are not reqdVals0 for themselves
+             let reqdVals0 = reqdVals0 |> List.filter (fclass.Contains >> not)
+             let reqdVals0 = reqdVals0 |> Zset.ofList valOrder
+             // collect into env over bodies
+             let z = PushFrame fclass (reqdTypars0, ctpsUsed, reqdVals0, m) z
+             let z = (z, tlrBs) ||> List.fold (foldOn (fun b -> b.Expr) recurseF)
              let z = SaveFrame fclass z
              // for bindings not marked TRL, collect 
              let z = (z, nonTlrBs) ||> List.fold (foldOn (fun b -> b.Expr) recurseF) 
@@ -790,7 +804,10 @@ type PackedReqdItems =
     {
         /// The actual typars
         ep_etps: Typars
-      
+
+        /// realsig+ - class type parameters used in the group body
+        ep_ctps: Typars
+
         /// The actual env carrier values
         ep_aenvs: Val   list
         
@@ -913,6 +930,7 @@ let FlatEnvPacks g fclassM topValS declist (reqdItemsMap: Zmap<BindingGroupShari
 
        // result
        (fc, { ep_etps = Zset.elements reqdTypars
+              ep_ctps = Zset.elements env.ctps
               ep_aenvs = aenvs
               ep_pack = pack
               ep_unpack = unpack}), carrierMaps
@@ -950,20 +968,33 @@ let MakeSimpleArityInfo tps n = ValReprInfo (ValReprInfo.InferTyparInfo tps, Lis
 let CreateNewValuesForTLR (scope: PerFileNamingScope) g tlrS arityM fclassM envPackM =
 
     let createFHat (f: Val) =
-        let wf = Zmap.force f arityM ("createFHat - wf", (valL >> showL))
+        let wf, homing = Zmap.force f arityM ("createFHat - wf", (valL >> showL))
         let fc = Zmap.force f fclassM ("createFHat - fc", nameOfVal)
         let envp = Zmap.force fc envPackM ("CreateNewValuesForTLR - envp", string)
         let name = f.LogicalName (* + "_TLR_" + string wf *)
         let m = f.Range
         let tps, tau = f.GeneralizedType
         let argTys, retTy = stripFunTy g tau
-        let newTps = envp.ep_etps @ tps
+        let methodTps = envp.ep_etps @ tps
+
+        // realsig+ - when homing on the hosting class, the class-level type parameters
+        // (ep_ctps) are placed ahead of the method-level ones, so that the wrapper and
+        // call sites can be rewritten as two type-arg groups (class; method).
+        // Under realsig- every typar is a method typar and ep_ctps is ignored here.
+        let realsigCtpSplit =
+            homing = HostingClass
+            && not (isNil envp.ep_ctps)
+            && (match f.TryDeclaringEntity with
+                | Parent tcref when not tcref.IsModuleOrNamespace -> true
+                | _ -> false)
+
+        let fHatTps = if realsigCtpSplit then envp.ep_ctps @ methodTps else methodTps
 
         let fHatTy =
             let newArgTys = List.map typeOfVal envp.ep_aenvs @ argTys
-            mkLambdaTy g newTps newArgTys retTy
+            mkLambdaTy g fHatTps newArgTys retTy
 
-        let fHatArity = MakeSimpleArityInfo newTps (envp.ep_aenvs.Length + wf)
+        let fHatArity = MakeSimpleArityInfo fHatTps (envp.ep_aenvs.Length + wf)
 
         let fHatName =
             scope.Fresh(name, m)
@@ -991,7 +1022,7 @@ module Pass4_RewriteAssembly =
          stackGuard: StackGuard
          tlrS: Zset<Val>
          topValS: Zset<Val>
-         arityM: Zmap<Val, int>
+         arityM: Zmap<Val, int * HomingKind>
          fclassM: Zmap<Val, BindingGroupSharingSameReqdItems>
          recShortCallS: Zset<Val>
          envPackM: Zmap<BindingGroupSharingSameReqdItems, PackedReqdItems>
@@ -1109,21 +1140,43 @@ module Pass4_RewriteAssembly =
             let aenvExprs = envp.ep_aenvs |> List.map (exprForVal m)
             let vsExprs = vss |> List.map (mkRefTupledVars penv.g m)
             let fHat = Zmap.force fOrig penv.fHatM ("fRebinding", nameOfVal)
+            let fHoming =
+                match Zmap.tryFind fOrig penv.arityM with
+                | Some (_, h) -> h
+                | None -> HelperClass
 
             // REVIEW: is this mutation really, really necessary? 
             // Why are we applying TLR if the thing already has an arity? 
             let fOrig = ClearValReprInfo fOrig
 
+            // realsig+ - when fHat is homed on the hosting class it carries two tiers
+            // of type parameters: class-level (ep_ctps) leading, method-level
+            // (ep_etps @ tps) trailing. Emit them as two type-arg groups so the
+            // downstream codegen can split class vs method level. Under realsig-
+            // (homing = HelperClass) the single-group form is used, exactly as before.
+            let wrapperTyargs =
+                let methodArgs = List.map mkTyparTy (envp.ep_etps @ tps)
+                if
+                    fHoming = HostingClass
+                    && not (isNil envp.ep_ctps)
+                    && (match fOrig.TryDeclaringEntity with
+                        | Parent tcref when not tcref.IsModuleOrNamespace -> true
+                        | _ -> false)
+                then
+                    [List.map mkTyparTy envp.ep_ctps; methodArgs]
+                else
+                    [methodArgs]
+
             let fBind =
                  mkMultiLambdaBind g fOrig letSeqPtOpt m tps vss
                      (mkApps penv.g
                          ((exprForVal m fHat, fHat.Type),
-                          [List.map mkTyparTy (envp.ep_etps @ tps)],
+                          wrapperTyargs,
                           aenvExprs @ vsExprs, m), bodyTy)
             fBind
 
         let fHatNewBinding (shortRecBinds: Bindings) (TBind(f, b, letSeqPtOpt)) =
-            let wf = Zmap.force f penv.arityM ("fHatNewBinding - arityM", nameOfVal)
+            let wf, homing = Zmap.force f penv.arityM ("fHatNewBinding - arityM", nameOfVal)
             let fHat = Zmap.force f penv.fHatM  ("fHatNewBinding - fHatM", nameOfVal)
 
             // Take off the variables
@@ -1138,8 +1191,22 @@ module Pass4_RewriteAssembly =
             // fHat, args
             let m = fHat.Range
 
-            // Add the type variables to the front
-            let fHat_tps = envp.ep_etps @ tps
+            // realsig+ - when fHat is homed on the hosting class the class-level
+            // type parameters (ep_ctps) are bound ahead of the method-level ones, so
+            // every type parameter is explicitly bound and none is left free in the
+            // body. Under realsig- ep_ctps is ignored, exactly as before.
+            let methodTps = envp.ep_etps @ tps
+            let fHat_tps =
+                if
+                    homing = HostingClass
+                    && not (isNil envp.ep_ctps)
+                    && (match f.TryDeclaringEntity with
+                        | Parent tcref when not tcref.IsModuleOrNamespace -> true
+                        | _ -> false)
+                then
+                    envp.ep_ctps @ methodTps
+                else
+                    methodTps
 
             // Add the 'aenv' and original taken variables to the front
             let fHat_args = List.map List.singleton envp.ep_aenvs @ vssTake
@@ -1193,18 +1260,37 @@ module Pass4_RewriteAssembly =
         match fx with
         | Expr.Val (fvref: ValRef, _, vm) when
                 (Zset.contains fvref.Deref penv.tlrS) &&
-                (let wf = Zmap.force fvref.Deref penv.arityM ("TransApp - wf", nameOfVal)
+                (let wf, _homing = Zmap.force fvref.Deref penv.arityM ("TransApp - wf", nameOfVal)
                  IsArityMet fvref wf tys args) ->
 
                    let f = fvref.Deref
+                   let fHoming =
+                       match Zmap.tryFind f penv.arityM with
+                       | Some (_, h) -> h
+                       | None -> HelperClass
                    (* replace by direct call to corresponding fHat (and additional closure args) *)
                    let fc = Zmap.force f  penv.fclassM ("TransApp - fc", nameOfVal)
                    let envp = Zmap.force fc penv.envPackM ("TransApp - envp", string)
                    let fHat = Zmap.force f  penv.fHatM ("TransApp - fHat", nameOfVal)
-                   let tys = (List.map mkTyparTy envp.ep_etps) @ tys
+                   let methodTys = (List.map mkTyparTy envp.ep_etps) @ tys
                    let aenvExprs = List.map (exprForVal vm) envp.ep_aenvs
                    let args = aenvExprs @ args
-                   mkApps penv.g ((exprForVal vm fHat, fHat.Type), [tys], args, m) (* change, direct fHat call with closure (reqdTypars, aenvs) *)
+                   // realsig+ - when fHat is homed on the hosting class it is
+                   // instantiated with two type-arg groups: class-level (ep_ctps)
+                   // then method-level (ep_etps + original tys). Under realsig- the
+                   // single-group form is used, exactly as before.
+                   let tyargs =
+                       if
+                           fHoming = HostingClass
+                           && not (isNil envp.ep_ctps)
+                           && (match f.TryDeclaringEntity with
+                               | Parent tcref when not tcref.IsModuleOrNamespace -> true
+                               | _ -> false)
+                       then
+                           [List.map mkTyparTy envp.ep_ctps; methodTys]
+                       else
+                           [methodTys]
+                   mkApps penv.g ((exprForVal vm fHat, fHat.Type), tyargs, args, m) (* change, direct fHat call with closure (reqdTypars, aenvs) *)
         | _ ->
             if isNil tys && isNil args then
                 fx
