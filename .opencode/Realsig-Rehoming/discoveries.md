@@ -49,3 +49,9 @@ Discoveries.md
 - BodyReferencesTypeScopedPrivate (the one site to keep using TryDeclaringEntity) matches vref (the ValRef at a reference site, i.e. the private member being invoked) rather than the local Val, so that site is still correct and must not be changed; the invalid sites matched the local Val whose declaring entity is ParentNone.
 - HomingKind (HostingClass | HelperClass) is the only thing derived from g.realsig in the file (Pass1 line 378); the typar-splitting sites only need (a) the host class Tycon from the map and (b) its Typars. No other site in the file reads g.realsig, so the map threads through Pass2, Pass3 (via envp.ep_ctps) and Pass4 (via envp.ep_ctps + arityM homing) without new gating.
 - The two wrapper/call-site predicate pairs (fHoming = HostingClass && not (isNil ep_ctps) && <has host>) were previously duplicated with TryDeclaringEntity; I collapsed each into a local let hostingSplit = ... (fRebinding, TransApp) so the condition is written once per site - reducing the risk of the two branches diverging.
+
+## Append: Acknowledgment.md ("Hello, World!") change
+
+- This task is docs-only under `.opencode/`, so it does not integrate with any compiler pass, TypedTree shape, or pickle format; no `src/` code path is touched.
+- The `.opencode/.gitignore` file contains only `*`, so new files there are untracked by default and must be staged with `git add -f` to appear in a unified diff.
+- `discoveries.md` already existed, so the discovery bullets were appended to the existing file rather than created; existing bullets were left intact to preserve prior-session reasoning.
