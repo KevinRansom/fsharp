@@ -6688,6 +6688,15 @@ and TcIteratedLambdas (cenv: cenv) isFirst (env: TcEnv) overallTy takenNames tpe
         let envinner, _, vspecMap = MakeAndPublishSimpleValsForMergedScope cenv env m names
         let byrefs = vspecMap |> Map.map (fun _ v -> isByrefTy g v.Type, v)
         // #5302: fields-only — a protected base field read type-checks here; methods/base stay FS0405.
+        //
+        // Capture the declaring type of the enclosing type region *before* the
+        // closure region is released by KeepFamilyRegionForClosure: this is the
+        // last point at which the type-checker knows the "home" of an inner
+        // lambda. This is stored in the shared in-memory TcGlobals.closureHomes
+        // side table (keyed by the lambda's fresh Unique id) purely for later
+        // consumption by the optimizer's top-level-representation decisions, and
+        // never serialized.
+        let homeTypeOpt = envinner.eFamilyType
         let envinner =
             if isMember then envinner else KeepFamilyRegionForClosure g envinner
         let vspecs = vs |> List.map (fun nm -> NameMap.find nm vspecMap)
@@ -6717,7 +6726,15 @@ and TcIteratedLambdas (cenv: cenv) isFirst (env: TcEnv) overallTy takenNames tpe
         byrefs |> Map.iter (fun _ (orig, v) ->
             if not orig && isByrefTy g v.Type then errorR(Error(FSComp.SR.tcParameterInferredByref (RichText.mkParameter v.DisplayName), v.Range)))
 
-        mkMultiLambda m vspecs (bodyExpr, resultTy), tpenv
+        let expr = mkMultiLambda m vspecs (bodyExpr, resultTy)
+        // Remember the declaring type captured above, keyed by this lambda's fresh unique id.
+        // The optimizer's MakeTopLevelRepresentationDecisions threads the same TcGlobals side table
+        // and may look it up by this id. Neither the table nor its values are ever serialized.
+        match homeTypeOpt, expr with
+        | Some tyconRef, Expr.Lambda (unique, _, _, _, _, _, _) ->
+            g.RecordClosureHome(unique, tyconRef)
+        | _, _ -> ()
+        expr, tpenv
 
     | e ->
         let env = { env with eIsControlFlow = true }

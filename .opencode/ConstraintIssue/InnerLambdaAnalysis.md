@@ -375,6 +375,7 @@ SynExpr.DotLambda is a separate SynExpr constructor (SyntaxTree.fs:816). It is n
     let pushedExpr = pushUnaryArg synExpr unaryArg
     let lambda = SynExpr.Lambda(false, false, SynSimplePats.SimplePats([ svar ],[], svar.Range), pushedExpr, None, m, SynExprLambdaTrivia.Zero)
     TcIteratedLambdas cenv true env overallTy Set.empty tpenv lambda
+
 ====================================================================
 SECTION 5 — TYPECHECKING (TcExpr, TcIteratedLambdas, TcLetrecBinding)
 ====================================================================

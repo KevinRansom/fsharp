@@ -1378,6 +1378,26 @@ module Pass4_RewriteAssembly =
 let RecreateUniqueBounds g expr =
     copyImplFile g OnlyCloneExprVals expr
 
+/// Finds the first Expr.Lambda unique id in the impl file. Only used to
+/// look up the "home" (declaring type) of an inner lambda in the in-memory
+/// TcGlobals.closureHomes side table; the value is intentionally unused here
+/// (kept purely for future consumption by the optimizer).
+let TryFindLambdaUnique expr : Unique option =
+    let mutable found : Unique option = None
+    let folder =
+        { ExprFolder0 with
+            exprIntercept = fun _recurseF noInterceptF z exprR ->
+                if Option.isNone found then
+                    match exprR with
+                    | Expr.Lambda (uniq, _, _, _, _, _, _) ->
+                        found <- Some uniq
+                        z // already found: stop descending into this subtree
+                    | _ -> noInterceptF z exprR
+                else
+                    z }
+    FoldImplFile folder () expr |> ignore
+    found
+
 //-------------------------------------------------------------------------
 // entry point
 //-------------------------------------------------------------------------
@@ -1386,6 +1406,16 @@ let MakeTopLevelRepresentationDecisions amap (scope: PerFileNamingScope) ccu g e
    try
       // pass1: choose the f to be TLR with arity(f)
       let tlrS, topValS, arityM = Pass1_DetermineTLRAndArities.DetermineTLRAndArities amap g expr
+
+      // The type-checker (TcIteratedLambdas) recorded the declaring type of inner lambdas in the
+      // in-memory, non-serialized side table g.closureHomes (keyed by the lambda's fresh Unique id).
+      // The table has been threaded into this function through the shared TcGlobals 'g'. We retrieve
+      // the entry here to prove the plumbing end-to-end, but must not use the value yet — only
+      // silence the unused-value warning.
+      let homeOpt =
+          TryFindLambdaUnique expr
+          |> Option.map g.ClosureHomeFor
+      ignore homeOpt
 
       // pass2: determine the typar/freevar closures, f->fclass and fclass declist
       let reqdItemsMap, fclassM, declist, recShortCallS = Pass2_DetermineReqdItems.DetermineReqdItems (tlrS, arityM) expr

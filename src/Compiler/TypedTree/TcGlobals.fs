@@ -1450,6 +1450,35 @@ type TcGlobals(
   member _.ClearExtensionOperatorSolutions(compilingCcu: CcuThunk) =
       extensionOperatorSolutions.Remove(compilingCcu) |> ignore
 
+  //-------------------------------------------------------------------------
+  // closureHomes: declaring-type record for inner lambdas
+  //-------------------------------------------------------------------------
+
+  /// In-memory, non-serialized side table recording the declaring type (TyconRef) that was active in the
+  /// type-checker's family region when an inner lambda was created, keyed by that lambda's fresh Unique id.
+  ///
+  /// The type-checker (TcIteratedLambdas) captures `env.eFamilyType` at the last point the enclosing type is
+  /// known and, when present, records it here after the typed lambda is constructed. The optimizer's
+  /// MakeTopLevelRepresentationDecisions then threads the table and can look it up by the lambda id.
+  /// This is purely intra-compilation metadata and is never written into any pickled type, so it is invisible
+  /// to the pickle machinery.
+  member val closureHomes: Map<Unique, TyconRef> = Map.empty with get, set
+
+  /// Record the declaring type of the lambda with Unique id 'uniqueId' as 'tyconRef'.
+  member this.RecordClosureHome(uniqueId: Unique, tyconRef: TyconRef) =
+      this.closureHomes <- this.closureHomes.Add(uniqueId, tyconRef)
+
+  /// Look up the declaring type recorded for the lambda with Unique id 'uniqueId', or None if the lambda was
+  /// not created inside a family region (i.e. no declaring type was captured for it).
+  member this.ClosureHomeFor(uniqueId: Unique) : TyconRef option =
+      Map.tryFind uniqueId this.closureHomes
+
+  /// Drop all recorded closure homes for the compiled unit. Mirrors ClearExtensionOperatorSolutions: FSI reuses
+  /// one TcGlobals across submissions, so any record made by one fragment must not leak into the next. Batch
+  /// (fsc) compilation may likewise clear once the file's optimization (and thus any lookups) has finished.
+  member this.ClearClosureHomes() =
+      this.closureHomes <- Map.empty
+
   member val system_Array_ty = mkSysNonGenericTy sys "Array"
   member val system_Object_ty = mkSysNonGenericTy sys "Object"
   member val system_IDisposable_ty = mkSysNonGenericTy sys "IDisposable"

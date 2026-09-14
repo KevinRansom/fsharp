@@ -247,6 +247,24 @@ type internal TcGlobals =
     /// so identical-layout submissions sharing one session CcuThunk do not poison one another.
     member ClearExtensionOperatorSolutions: compilingCcu: TypedTree.CcuThunk -> unit
 
+    /// In-memory, non-serialized side table recording the declaring type of an inner lambda at the point where
+    /// the type-checker released the enclosing family region (i.e. the last point the "home" was known for it),
+    /// keyed by the lambda's fresh Unique id. Never written into any pickled type, so invisible to the pickle
+    /// machinery. The type-checker (TcIteratedLambdas) populates it; the optimizer (MakeTopLevelRepresentationDecisions)
+    /// threads the same TcGlobals and may look it up by id.
+    member closureHomes: Map<CompilerGlobalState.Unique, TypedTree.TyconRef> with get, set
+
+    /// Record the declaring type of the lambda with 'uniqueId' as 'tyconRef'.
+    member RecordClosureHome: uniqueId: CompilerGlobalState.Unique * tyconRef: TypedTree.TyconRef -> unit
+
+    /// Look up the declaring type recorded for the lambda with 'uniqueId', or None if no declaring type was
+    /// captured for it (i.e. it was not created inside a family region).
+    member ClosureHomeFor: uniqueId: CompilerGlobalState.Unique -> TypedTree.TyconRef option
+
+    /// Drop all recorded closure homes. Called at each FSI fragment boundary so a shared TcGlobals does not leak
+    /// one submission's records into the next. Batch (fsc) compilation may do the same at the file boundary.
+    member ClearClosureHomes: unit -> unit
+
     member mkDebuggableAttributeV2:
         jitTracking: bool * jitOptimizerDisabled: bool -> FSharp.Compiler.AbstractIL.IL.ILAttribute
 
