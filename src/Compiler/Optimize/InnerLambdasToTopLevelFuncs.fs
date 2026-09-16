@@ -1520,7 +1520,6 @@ let MakeTopLevelRepresentationDecisions (amap:Import.ImportMap) (scope: PerFileN
       // and, once bound, by the bound Val's Stamp). g is threaded into the passes below; the homing of
       // each lifted helper is resolved through closureHomingFor in pass2 (accBinds), pass3 (createFHat)
       // and pass4 (fRebinding / fHatNewBinding / TransApp).
-      ()
 
       // pass2: determine the typar/freevar closures, f->fclass and fclass declist
       let reqdItemsMap, fclassM, declist, recShortCallS = Pass2_DetermineReqdItems.DetermineReqdItems (tlrS, arityM) g expr
