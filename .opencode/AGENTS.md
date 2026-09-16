@@ -357,6 +357,15 @@ output in `.err`/`.vserr` during the test run).
 - DO run `dotnet fantomas . --check` (or rely on the `/run fantomas` PR
   command) after touching files under the Fantomas-formatted set.
 
+### F# indentation rules for agents
+
+- DO treat indentation as **semantically significant** in F#. Incorrect indentation changes scope and compilation behavior.
+- DO use **spaces only** for indentation. Tabs are illegal in F# source files.
+- DO match the indentation style of the surrounding file (indent width, alignment of `let`, `match`/`|` arms, `member` definitions, pipelines, lambdas, computation expressions).
+- DO infer intended scope from context and ensure indentation reflects the correct AST structure.
+- DO perform an indentation audit before producing final output: verify consistent alignment of `match` arms, `|` patterns, nested `let` bindings, and multiline expressions.
+- DO NOT rely on the compiler to surface indentation errors. Agents must emit indentation‑correct F# code on the first attempt.
+- DO copy the indentation style of the nearest surrounding code block when conventions are unclear (still using spaces only).
 
 ## cheat mode handy tips
 

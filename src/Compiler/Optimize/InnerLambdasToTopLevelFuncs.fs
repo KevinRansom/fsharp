@@ -420,6 +420,37 @@ type Generators = Zset<Val>
 let IsArityMet (vref: ValRef)  wf (tys: TypeInst) args =
     (tys.Length = vref.Typars.Length) && (wf <= List.length args)
 
+/// Finds the first Expr.Lambda unique id in the impl file. Used to look up the
+/// "home" (declaring type) of an inner lambda in the in-memory TcGlobals.closureHomes
+/// side table (keyed by the lambda's fresh Unique id).
+let TryFindLambdaUnique (expr: Expr) : Unique option =
+    let mutable found : Unique option = None
+    let folder =
+        { ExprFolder0 with
+            exprIntercept = fun _recurseF noInterceptF z exprR ->
+                if Option.isNone found then
+                    match exprR with
+                    | Expr.Lambda (uniq, _, _, _, _, _, _) ->
+                        found <- Some uniq
+                        z // already found: stop descending into this subtree
+                    | _ -> noInterceptF z exprR
+                else
+                    z }
+    FoldExpr folder () expr |> ignore
+    found
+
+/// realsig+ - look up the declaring type (homing type) of a TLR-bound value in the dual-key
+/// TcGlobals.closureHomes side table. This replaces the prior homing logic that read
+/// Val.TryDeclaringEntity. Prefer the byVal index (keyed by the bound Val's Stamp); when
+/// absent, fall back to the byUnique index (keyed by the lambda's fresh Unique id, recovered
+/// from the provided binding expression, if any). Returns None when no home was captured.
+let closureHomingFor (g: TcGlobals) (v: Val) (lambdaExpr: Expr option) : TyconRef option =
+    match g.ClosureHomeForVal v with
+    | Some tcref -> Some tcref
+    | None ->
+        (lambdaExpr |> Option.bind TryFindLambdaUnique)
+        |> Option.bind (fun u -> g.ClosureHomeFor u)
+
 module Pass2_DetermineReqdItems =
 
     // IMPLEMENTATION PLAN:
@@ -540,7 +571,7 @@ module Pass2_DetermineReqdItems =
     ///   "app (f, tps, args)"                             - occurrence
     ///
     /// On intercepted nodes, must recurseF fold to collect from subexpressions.
-    let ExprEnvIntercept (tlrS, arityM) recurseF noInterceptF z expr =
+    let ExprEnvIntercept (tlrS, arityM) g recurseF noInterceptF z expr =
 
          let accInstance z (fvref: ValRef, tps, args) =
              let f = fvref.Deref
@@ -568,12 +599,14 @@ module Pass2_DetermineReqdItems =
              let fclass = BindingGroupSharingSameReqdItems tlrBs
              // what determines env?
              let frees = FreeInBindings tlrBs
-             // realsig+ - ambient class typars of the enclosing host, gathered across the group
+             // realsig+ - ambient class typars of the enclosing host, gathered across the group.
+             // Looked up in the dual-key TcGlobals.closureHomes side table (replaces the prior
+             // Val.TryDeclaringEntity-based homing logic).
              let ambientCtps0 =
                  tlrBs
                  |> List.map (fun b ->
-                     match b.Var.TryDeclaringEntity with
-                     | Parent tcref when not tcref.IsModuleOrNamespace -> tcref.Typars
+                     match closureHomingFor g b.Var (Some b.Expr) with
+                     | Some tcref when not tcref.IsModuleOrNamespace -> tcref.Typars
                      | _ -> [])
                  |> List.collect id
                  |> Zset.ofList typarOrder
@@ -669,9 +702,9 @@ module Pass2_DetermineReqdItems =
             dprintf "CLASS=%A\n env=%A\n" fc  env
 #endif
 
-    let DetermineReqdItems (tlrS, arityM) expr =
+    let DetermineReqdItems (tlrS, arityM) g expr =
         if verboseTLR then dprintf "DetermineReqdItems------\n"
-        let folder = {ExprFolder0 with exprIntercept = ExprEnvIntercept (tlrS, arityM)}
+        let folder = {ExprFolder0 with exprIntercept = ExprEnvIntercept (tlrS, arityM) g}
         let z = state0
         // Walk the entire assembly
         let z = FoldImplFile folder z expr
@@ -901,8 +934,8 @@ let CreateNewValuesForTLR (scope: PerFileNamingScope) g tlrS arityM fclassM envP
         let realsigCtpSplit =
             homing = HostingClass
             && not (isNil envp.ep_ctps)
-            && (match f.TryDeclaringEntity with
-                | Parent tcref when not tcref.IsModuleOrNamespace -> true
+            && (match closureHomingFor g f None with
+                | Some tcref when not tcref.IsModuleOrNamespace -> true
                 | _ -> false)
 
         let fHatTps = if realsigCtpSplit then envp.ep_ctps @ methodTps else methodTps
@@ -1076,8 +1109,8 @@ module Pass4_RewriteAssembly =
                 if
                     fHoming = HostingClass
                     && not (isNil envp.ep_ctps)
-                    && (match fOrig.TryDeclaringEntity with
-                        | Parent tcref when not tcref.IsModuleOrNamespace -> true
+                    && (match closureHomingFor penv.g fOrig (Some body) with
+                        | Some tcref when not tcref.IsModuleOrNamespace -> true
                         | _ -> false)
                 then
                     [List.map mkTyparTy envp.ep_ctps; methodArgs]
@@ -1117,8 +1150,8 @@ module Pass4_RewriteAssembly =
                 if
                     homing = HostingClass
                     && not (isNil envp.ep_ctps)
-                    && (match f.TryDeclaringEntity with
-                        | Parent tcref when not tcref.IsModuleOrNamespace -> true
+                    && (match closureHomingFor penv.g f (Some b) with
+                        | Some tcref when not tcref.IsModuleOrNamespace -> true
                         | _ -> false)
                 then
                     envp.ep_ctps @ methodTps
@@ -1200,8 +1233,8 @@ module Pass4_RewriteAssembly =
                        if
                            fHoming = HostingClass
                            && not (isNil envp.ep_ctps)
-                           && (match f.TryDeclaringEntity with
-                               | Parent tcref when not tcref.IsModuleOrNamespace -> true
+                           && (match closureHomingFor penv.g f None with
+                               | Some tcref when not tcref.IsModuleOrNamespace -> true
                                | _ -> false)
                        then
                            [List.map mkTyparTy envp.ep_ctps; methodTys]
@@ -1473,26 +1506,6 @@ module Pass4_RewriteAssembly =
 let RecreateUniqueBounds g expr =
     copyImplFile g OnlyCloneExprVals expr
 
-/// Finds the first Expr.Lambda unique id in the impl file. Only used to
-/// look up the "home" (declaring type) of an inner lambda in the in-memory
-/// TcGlobals.closureHomes side table; the value is intentionally unused here
-/// (kept purely for future consumption by the optimizer).
-let TryFindLambdaUnique expr : Unique option =
-    let mutable found : Unique option = None
-    let folder =
-        { ExprFolder0 with
-            exprIntercept = fun _recurseF noInterceptF z exprR ->
-                if Option.isNone found then
-                    match exprR with
-                    | Expr.Lambda (uniq, _, _, _, _, _, _) ->
-                        found <- Some uniq
-                        z // already found: stop descending into this subtree
-                    | _ -> noInterceptF z exprR
-                else
-                    z }
-    FoldImplFile folder () expr |> ignore
-    found
-
 //-------------------------------------------------------------------------
 // entry point
 //-------------------------------------------------------------------------
@@ -1503,17 +1516,14 @@ let MakeTopLevelRepresentationDecisions (amap:Import.ImportMap) (scope: PerFileN
       let tlrS, topValS, arityM = Pass1_DetermineTLRAndArities.DetermineTLRAndArities amap g expr
 
       // The type-checker (TcIteratedLambdas) recorded the declaring type of inner lambdas in the
-      // in-memory, non-serialized side table g.closureHomes (keyed by the lambda's fresh Unique id).
-      // The table has been threaded into this function through the shared TcGlobals 'g'. We retrieve
-      // the entry here to prove the plumbing end-to-end, but must not use the value yet — only
-      // silence the unused-value warning.
-      let homeOpt =
-          TryFindLambdaUnique expr
-          |> Option.map g.ClosureHomeFor
-      ignore homeOpt
+      // in-memory, non-serialized side table g.closureHomes (dual-key: by the lambda's fresh Unique id
+      // and, once bound, by the bound Val's Stamp). g is threaded into the passes below; the homing of
+      // each lifted helper is resolved through closureHomingFor in pass2 (accBinds), pass3 (createFHat)
+      // and pass4 (fRebinding / fHatNewBinding / TransApp).
+      ()
 
       // pass2: determine the typar/freevar closures, f->fclass and fclass declist
-      let reqdItemsMap, fclassM, declist, recShortCallS = Pass2_DetermineReqdItems.DetermineReqdItems (tlrS, arityM) expr
+      let reqdItemsMap, fclassM, declist, recShortCallS = Pass2_DetermineReqdItems.DetermineReqdItems (tlrS, arityM) g expr
 
       // pass3
       let envPackM = ChooseReqdItemPackings g fclassM topValS  declist reqdItemsMap
