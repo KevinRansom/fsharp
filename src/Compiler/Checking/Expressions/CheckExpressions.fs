@@ -12157,6 +12157,37 @@ and TcLetBinding (cenv: cenv) isUse env containerInfo declKind tpenv (synBinds, 
         let checkedPat = tcPatPhase2 (TcPatPhase2Input (values, true))
         let prelimRecValues = NameMap.map fst values
 
+        // Record the homing type of each bound Val in the dual-key closureHomes table. The
+        // rhs expression has been type-checked; walk it once (stopping at the first lambda)
+        // to recover the lambda's fresh Unique id, then look up the home that TcIteratedLambdas
+        // recorded under that unique and copy it into the byVal index (keyed by each bound Val's
+        // Stamp). If the rhs is not a closure or its home was not captured, the byUnique lookup
+        // will fail and nothing is recorded. The byUnique entry is left in place, so the
+        // optimizer may still look up the home by the lambda id.
+        let mutable foundLambda : int64 option = None
+        let closureHomeFolder =
+            { ExprFolder0 with
+                exprIntercept = fun _recurseF noInterceptF z exprR ->
+                    if Option.isNone foundLambda then
+                        match exprR with
+                        | Expr.Lambda (uniq, _, _, _, _, _, _) ->
+                            foundLambda <- Some uniq
+                            z // already found: stop descending into this subtree
+                        | Expr.TyLambda (uniq, _, _, _, _) ->
+                            foundLambda <- Some uniq
+                            z
+                        | _ -> noInterceptF z exprR
+                    else
+                        z }
+        FoldExpr closureHomeFolder () rhsExpr |> ignore
+        match foundLambda with
+        | Some u ->
+            match g.ClosureHomeFor u with
+            | Some home ->
+                NameMap.iter (fun (v, _) -> g.RecordClosureHomeForVal(v, home)) values
+            | None -> ()
+        | None -> ()
+
         // Now bind the r.h.s. to the l.h.s.
         let rhsExpr = mkTypeLambda m generalizedTypars (rhsExpr, tauTy)
 
@@ -12985,6 +13016,34 @@ and TcLetrecBinding
 
     (try UnifyTypes cenv envRec vspec.Range (allDeclaredTypars +-> tau) vspec.Type
      with e -> error (Recursion(envRec.DisplayEnv, vspec.Id, tau, vspec.Type, vspec.Range)))
+
+    // Record the homing type of the bound Val in the dual-key closureHomes table. The rhs
+    // expression has been type-checked; walk it once (stopping at the first lambda) to recover
+    // the lambda's fresh Unique id, then look up the home that TcIteratedLambdas recorded under
+    // that unique and copy it into the byVal index (keyed by the bound Val's Stamp). The byUnique
+    // entry is left in place, so the optimizer may still look up the home by the lambda id.
+    let mutable foundLambda : int64 option = None
+    let folder =
+        { ExprFolder0 with
+            exprIntercept = fun _recurseF noInterceptF z exprR ->
+                if Option.isNone foundLambda then
+                    match exprR with
+                    | Expr.Lambda (uniq, _, _, _, _, _, _) ->
+                        foundLambda <- Some uniq
+                        z // already found: stop descending into this subtree
+                    | Expr.TyLambda (uniq, _, _, _, _) ->
+                        foundLambda <- Some uniq
+                        z
+                    | _ -> noInterceptF z exprR
+                else
+                    z }
+    FoldExpr folder () checkedBind.Expr |> ignore
+    match foundLambda with
+    | Some u ->
+        match g.ClosureHomeFor u with
+        | Some home -> g.RecordClosureHomeForVal(vspec, home)
+        | None -> ()
+    | None -> ()
 
     // Inside the incremental class syntax we assert the type of the 'this' variable to be precisely the same type as the
     // this variable for the implicit class constructor. For static members, we assert the type variables associated
