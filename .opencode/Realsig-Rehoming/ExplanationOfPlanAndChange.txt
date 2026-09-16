@@ -1,0 +1,62 @@
+Plan (Part 1 of the realsig+ re-homing fix)
+Problem framing
+Inner lambdas bound inside a class body (i.e. member or constructor expressions like moveNext, getCurrent) are Vals created during type checking. They are not given a DeclaringEntity — Val.val_opt_data.val_declaring_entity stays ParentNone. The TLR pass (MakeTopLevelRepresentationDecisions) collects them into tlrS, but there is no way to tell which class they belong to, so part 2 cannot emit them back at the right IL scope.
+Val.DeclaringEntity cannot be used because (a) it is already set to non-ParentNone for genuine members — and TLR logic throughout the compiler relies on DeclaringEntity = ParentNone to mean "local/inner lambda / compiler-generated"; (b) adding a new field to Val/ValOptionalData would change the pickled format.
+Where the info is lost
+The information is lost during type checking of Expr.Obj:
+- A member { ... } inside a class becomes Expr.Obj(lambdaId, ty, baseVal, ctorCall, overrides, interfaceImpls, range) where ty is the class type (a TType_tyc referencing the class Tycon, e.g. ConcatEnumerator<'T,'U>).
+- The let rec genericTakeInner/genericTakeOuter bindings inside member x.MoveNext() are Expr.Let/LetRec nested inside Expr.Lambda(... body ...) inside TObjExprMethod(... methodBodyExpr ...).
+- The TLR pass only sees the TAST (CheckedImplFile); by that point the class identity is reachable only via the enclosing Expr.Obj type — and no pass anywhere in the file has a Val -> declaring class map.
+Part 1: thread the information (the ask)
+Compute a Val -> TyconRef ("declaring class of the inner lambda") map by walking the expression before / as part of DetermineTLRAndArities, and thread it through to MakeTopLevelRepresentationDecisions and DetermineTLRAndArities.
+1. What files will be changed
+1. src/Compiler/Optimize/InnerLambdasToTopLevelFuncs.fsi
+2. src/Compiler/Optimize/InnerLambdasToTopLevelFuncs.fs
+3. src/Compiler/Driver/OptimizeInputs.fs (no change to the call site signature is strictly needed if we compute it inside MakeTopLevelRepresentationDecisions, which is the recommended option)
+4. .opencode/Realsig-Rehoming/discoveries.md (new)
+2. What functions will be added or modified
+In InnerLambdasToTopLevelFuncs.fs:
+- Added module ClassRehoming: a small helper module that walks the Expr tree and builds Zmap<Val, TyconRef> for every Val that is bound inside an Expr.Obj whose objTy is a class TType (TType_tyc for a struct class with TyconMethods). Uses an ExprFolder0-based folder that:
+- pushes the current TyconRef on a stack when entering Expr.Obj;
+- in valBindingSiteIntercept (the natural place: fires for every TBind) records binding.Var -> currentTycon if the stack is non-empty;
+- pops when exiting Expr.Obj.
+The existing tmethodIntercept / targetIntercept (already in ExprFolder0) are used so the walk is precise and doesn't depend on ObjExprMethod.
+- Modified Pass1_DetermineTLRAndArities.DetermineTLRAndArities
+- New signature: DetermineTLRAndArities amap g expr innerLambdaDeclaringTyconM where innerLambdaDeclaringTyconM : Zmap<Val, TyconRef> (a "hint" map; empty map if no class re-homing needed).
+- Returns a 4-tuple (tlrS, topValS, arityM, innerLambdaDeclaringTyconM) — the same input map, projected to tlrS as an output, so that pass 2 / 4 can use it without re-walking the tree. (Adding a 4th element to the public tuple is additive; no existing pattern in Pass1_DetermineTLRAndArities.DetermineTLRAndArities consumes it because it is internal.)
+- Modified Pass2_DetermineReqdItems.DetermineReqdItems (optional, recommended) so that reqdTypars / reqdItems can take the declaring class's typars into account. No signature change — just thread the map through the folder state so part 2 can read it when computing reqdTypars.
+- Modified MakeTopLevelRepresentationDecisions to:
+- Build the map once before pass 1: let declaringTyconM = ClassRehoming.Compute expr.
+- Pass it to DetermineTLRAndArities.
+- Return expr, declaringTyconM (or keep returning just expr and add a module-level let that part 2 reads — recommended: extend the public signature to return the map as a 2nd element; this is non-pickled state computed from the TAST and can be passed as a plain value).
+- Modified .fsi to widen the public surface:
+- Add val ComputeInnerLambdaDeclaringTycons: expr: CheckedImplFile -> Zmap<Val, TyconRef> (exported for part 2 / diagnostics), OR
+- Leave the public signature as MakeTopLevelRepresentationDecisions returning CheckedImplFile and instead add a separate val InnerLambdaDeclaringTyconsOf: CheckedImplFile -> Zmap<Val, TyconRef>. Recommended: the latter, to minimize signature churning and to keep MakeTopLevelRepresentationDecisions as the main entry point.
+3. New types / modules / helpers
+- module ClassRehoming (new, internal, in InnerLambdasToTopLevelFuncs.fs) with:
+- type ClassFrame = { tycon: TyconRef; name: string }
+- type State = { stack: ClassFrame list; map: Zmap<Val, TyconRef> }
+- let compute (expr: CheckedImplFile) : Zmap<Val, TyconRef>
+- No new pickled data. The result is a value in the compiler heap only.
+4. How the change integrates
+- No changes to type-checking passes (CheckExpressions.fs, CheckDeclarations.fs) — the info is recovered from the TAST.
+- No changes to DetupleArgs, LowerCalls, or any other phase.
+- No changes to TypedTreePickle, QuotationPickler, ValOptionalData, or Val — preserves the pickling format, per the requirement.
+- No changes to FCS / LSP consumer APIs.
+- MakeTopLevelRepresentationDecisions continues to be the only public entry point for part 1; part 2 (DetermineReqdItems / the rewrite / CreateNewValuesForTLR) will be given access to the map via either a module-level ref or (cleaner) by widening the RewriteContext in Pass4_RewriteAssembly to contain declaringTyconM : Zmap<Val, TyconRef>. That widening is optional in this step and can be done in part 2.
+What is NOT in part 1
+- No changes to FlatEnvPacks / createFHat to actually attach the class to the fHat.
+- No changes to IlxGen to emit the fHat as a static method on the class.
+- No changes to fsc / fsi command line.
+Verification (part 1, "verify the wiring in a debugger")
+- Build fsc (build.cmd -noVisualStudio -c Release).
+- Compile the reference file: artifacts\bin\fsc\Release\net472\fsc.exe --nologo tests\FSharp.Compiler.ComponentTests\EmittedIL\RealInternalSignature\nested_generic_closure.fs --realsig+ --optimize+ --out:artifacts\Temp\NestedGen.exe.
+- In the debugger, at the MakeTopLevelRepresentationDecisions call site (or just after Pass1_DetermineTLRAndArities.DetermineTLRAndArities), evaluate the new declaringTyconM and confirm it contains genericTakeInner, genericTakeOuter, takeInner, takeOuter all mapped to ConcatEnumerator<'T,'U> (a TyconRef with typars 'T and 'U).
+Discovery file
+.opencode/Realsig-Rehoming/discoveries.md (new) — bullets to be appended during implementation.
+Deliverables
+1. Unified diff covering InnerLambdasToTopLevelFuncs.fs, InnerLambdasToTopLevelFuncs.fsi, and the new discoveries.md.
+2. Apply the diff to the repo.
+3. List changed files.
+4. A short "verification prompt" the user can paste into a debugger/REPL.
+Please approve (or ask for changes) and I will generate the diff, apply it, and produce the verification prompt.
