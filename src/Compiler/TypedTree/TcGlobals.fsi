@@ -135,6 +135,23 @@ val internal tname_RuntimeArgumentHandle: string = "System.RuntimeArgumentHandle
 [<Literal>]
 val internal tname_IsByRefLikeAttribute: string = "System.Runtime.CompilerServices.IsByRefLikeAttribute"
 
+/// In-memory, non-serialized dual-key side table recording the declaring type of an inner lambda at the point
+/// where the type-checker released the enclosing family region (i.e. the last point the "home" was known for it).
+///
+/// Two views into the same logical table:
+///
+/// - `byUnique`: keyed by the lambda's fresh `Unique` id (only identifier available when TcIteratedLambdas first
+///   records the home, before any let/letrec binding exists).
+/// - `byVal`: keyed by the bound `Val`'s `Stamp` (the stable identity later used by TLR / homing decisions),
+///   populated at let/letrec-binding time by re-lookup of the Unique recorded earlier.
+///
+/// Visible to the optimizer via the shared TcGlobals; never written into any pickle.
+type internal ClosureHomes =
+    {
+        byVal    : Map<TypedTree.Stamp, TypedTree.TyconRef>
+        byUnique : Map<CompilerGlobalState.Unique, TypedTree.TyconRef>
+    }
+
 type internal TcGlobals =
 
     new:
@@ -246,6 +263,30 @@ type internal TcGlobals =
     /// Drop all recorded extension-operator solutions for 'compilingCcu'. Called at each FSI fragment boundary
     /// so identical-layout submissions sharing one session CcuThunk do not poison one another.
     member ClearExtensionOperatorSolutions: compilingCcu: TypedTree.CcuThunk -> unit
+
+    /// In-memory, non-serialized dual-key side table recording the declaring type of an inner lambda at the
+    /// point where the type-checker released the enclosing family region. Threaded through the shared TcGlobals;
+    /// readable by id (lambda's Unique) or by bound-Val Stamp. Never written into any pickle.
+    member closureHomes: ClosureHomes with get, set
+
+    /// Record the declaring type of the lambda with 'uniqueId' as 'tyconRef'. Only the Unique key is available
+    /// at TcIteratedLambdas time (before any let/letrec binding has been introduced).
+    member RecordClosureHome: uniqueId: CompilerGlobalState.Unique * tyconRef: TypedTree.TyconRef -> unit
+
+    /// Record the declaring type of a bound 'val' as 'tyconRef', tying the stable Val identity (by Stamp) to the
+    /// homing type. Called at let/letrec-binding time once the bound Val actually exists.
+    member RecordClosureHomeForVal: theBoundVal: TypedTree.Val * tyconRef: TypedTree.TyconRef -> unit
+
+    /// Look up the declaring type recorded for the lambda with 'uniqueId', or None if no declaring type was
+    /// captured for it (i.e. it was not created inside a family region).
+    member ClosureHomeFor: uniqueId: CompilerGlobalState.Unique -> TypedTree.TyconRef option
+
+    /// Look up the declaring type recorded for a bound 'val', or None if no home has been tied to it yet.
+    member ClosureHomeForVal: theBoundVal: TypedTree.Val -> TypedTree.TyconRef option
+
+    /// Drop all recorded closure homes. Called at each FSI fragment boundary so a shared TcGlobals does not leak
+    /// one submission's records into the next. Batch (fsc) compilation may do the same at the file boundary.
+    member ClearClosureHomes: unit -> unit
 
     member mkDebuggableAttributeV2:
         jitTracking: bool * jitOptimizerDisabled: bool -> FSharp.Compiler.AbstractIL.IL.ILAttribute

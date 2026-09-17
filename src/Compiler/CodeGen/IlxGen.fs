@@ -10958,9 +10958,14 @@ and AllocValReprWithinExpr cenv cgbuf endMark cloc v eenv =
                 else
                     CompLocForInitClass eenv.moduleCloc
             else
-                eenv.moduleCloc
+                // With realsig=true these vals are hosted on the type that originated the closure
+                // With realsig=false these vals are hosted on the module enclosing the type that originated the closure
+                if cenv.g.realsig then
+                    cloc
+                else
+                    eenv.moduleCloc
         else
-            cloc
+            cloc 
 
     ComputeAndAddStorageForLocalValWithValReprInfo
         (cenv, eenv.intraAssemblyInfo, cenv.options.isInteractive, optShadowLocal)

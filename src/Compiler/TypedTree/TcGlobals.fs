@@ -184,6 +184,25 @@ type CompilationMode =
     | Service
     | Interactive
 
+/// In-memory, non-serialized dual-key side table recording the declaring type (TyconRef) that was active in the
+/// type-checker's family region when an inner lambda was created.
+///
+/// The record carries two separate indexes into the same logical table:
+///
+/// - `byUnique`: keyed by the lambda's fresh `Unique` id (the only identifier available when the type-checker
+///   first records the home, in TcIteratedLambdas, before any binding has been created).
+/// - `byVal`: keyed by the bound `Val`'s `Stamp` (the stable identity the optimizer later uses to find the home
+///   of a TLR / homing decision). This is populated at let/letrec-binding time, once the bound Val actually
+///   exists, by re-lookup via the Unique recorded earlier.
+///
+/// This is purely intra-compilation metadata and is never written into any pickled type, so it is invisible
+/// to the pickle machinery.
+type ClosureHomes =
+    {
+        byVal    : Map<Stamp, TyconRef>
+        byUnique : Map<Unique, TyconRef>
+    }
+
 type TcGlobals(
     compilingFSharpCore: bool,
     ilg: ILGlobals,
@@ -1479,6 +1498,58 @@ type TcGlobals(
   /// names and never calls this.
   member _.ClearExtensionOperatorSolutions(compilingCcu: CcuThunk) =
       extensionOperatorSolutions.Remove(compilingCcu) |> ignore
+
+  //-------------------------------------------------------------------------
+  // closureHomes: declaring-type record for inner lambdas
+  //-------------------------------------------------------------------------
+
+  /// In-memory, non-serialized dual-key side table recording the declaring type (TyconRef) that was active in the
+  /// type-checker's family region when an inner lambda was created.
+  ///
+  /// The record carries two separate indexes into the same logical table:
+  ///
+  /// - `byUnique`: keyed by the lambda's fresh `Unique` id (the only identifier available when the type-checker
+  ///   first records the home, in TcIteratedLambdas, before any binding has been created).
+  /// - `byVal`: keyed by the bound `Val`'s `Stamp` (the stable identity the optimizer later uses to find the home
+  ///   of a TLR / homing decision). This is populated at let/letrec-binding time, once the bound Val actually
+  ///   exists, by re-lookup via the Unique recorded earlier.
+  ///
+  /// The type-checker (TcIteratedLambdas) captures `env.eFamilyType` at the last point the enclosing type is
+  /// known, and records it here keyed by the lambda's unique. Later, in the let/letrec-binding path, the same TyconRef
+  /// is copied to the `byVal` entry as soon as the bound Val exists. The optimizer's
+  /// MakeTopLevelRepresentationDecisions then threads the table and can look it up by either key.
+  ///
+  /// This is purely intra-compilation metadata and is never written into any pickled type, so it is invisible
+  /// to the pickle machinery.
+  member val closureHomes: ClosureHomes = { byVal = Map.empty; byUnique = Map.empty } with get, set
+
+  /// Record the declaring type of the lambda with Unique id 'uniqueId' as 'tyconRef'.
+  /// This is the only key available at TcIteratedLambdas time, before any let/letrec binding has been introduced.
+  member this.RecordClosureHome(uniqueId: Unique, tyconRef: TyconRef) =
+      let byUnique = Map.add uniqueId tyconRef this.closureHomes.byUnique
+      this.closureHomes <- { this.closureHomes with byUnique = byUnique }
+
+  /// Record the declaring type of the bound 'val' as 'tyconRef', tying the stable Val identity (by its Stamp) to the
+  /// homing type. Called at let/letrec-binding time once the bound Val actually exists.
+  member this.RecordClosureHomeForVal(theBoundVal: Val, tyconRef: TyconRef) =
+      let byVal = Map.add theBoundVal.Stamp tyconRef this.closureHomes.byVal
+      this.closureHomes <- { this.closureHomes with byVal = byVal }
+
+  /// Look up the declaring type recorded for the lambda with Unique id 'uniqueId', or None if the lambda was
+  /// not created inside a family region (i.e. no declaring type was captured for it).
+  member this.ClosureHomeFor(uniqueId: Unique) : TyconRef option =
+      Map.tryFind uniqueId this.closureHomes.byUnique
+
+  /// Look up the declaring type recorded for the bound 'val', or None if no home has been tied to this Val yet
+  /// (e.g. the rhs is not a closure, or the binding has not gone through the let/letrec path that records the home).
+  member this.ClosureHomeForVal(theBoundVal: Val) : TyconRef option =
+      Map.tryFind theBoundVal.Stamp this.closureHomes.byVal
+
+  /// Drop all recorded closure homes for the compiled unit. Mirrors ClearExtensionOperatorSolutions: FSI reuses
+  /// one TcGlobals across submissions, so any record made by one fragment must not leak into the next. Batch
+  /// (fsc) compilation may likewise clear once the file's optimization (and thus any lookups) has finished.
+  member this.ClearClosureHomes() =
+      this.closureHomes <- { byVal = Map.empty; byUnique = Map.empty }
 
   member val system_Array_ty = mkSysNonGenericTy sys "Array"
   member val system_Object_ty = mkSysNonGenericTy sys "Object"
