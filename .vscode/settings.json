@@ -18,7 +18,7 @@
     "FSharp.suggestGitignore": false,
     "FSharp.enableMSBuildProjectGraph": true,
     "FSharp.enableAdaptiveLspServer": true,
-    "FSharp.workspacePath": "FSharp.Compiler.Service.slnx",
+    "FSharp.workspacePath": "./VisualFSharp.slnx",
     "FSharp.workspaceModePeekDeepLevel": 1,
     "FSharp.excludeProjectDirectories": [
         ".git",

@@ -195,12 +195,25 @@ type CompilationMode =
 ///   of a TLR / homing decision). This is populated at let/letrec-binding time, once the bound Val actually
 ///   exists, by re-lookup via the Unique recorded earlier.
 ///
+/// A single recorded closure home. Carries the declaring type (`tycon`) together with the count
+/// (`inheritedHomeTyparCount`) of the closure's generic-signature type parameters that are also type
+/// parameters of the home type — i.e. those inherited from the declaring (home) family type rather than
+/// inferred or declared locally on the method where the closure was discovered.
+///
+/// This is purely intra-compilation metadata and is never written into any pickled type, so it is invisible
+/// to the pickle machinery.
+type ClosureHomeEntry =
+    {
+        tycon                 : TyconRef
+        inheritedHomeTyparCount : int
+    }
+
 /// This is purely intra-compilation metadata and is never written into any pickled type, so it is invisible
 /// to the pickle machinery.
 type ClosureHomes =
     {
-        byVal    : Map<Stamp, TyconRef>
-        byUnique : Map<Unique, TyconRef>
+        byVal    : Map<Stamp, ClosureHomeEntry>
+        byUnique : Map<Unique, ClosureHomeEntry>
     }
 
 type TcGlobals(
@@ -1473,8 +1486,10 @@ type TcGlobals(
   // closureHomes: declaring-type record for inner lambdas
   //-------------------------------------------------------------------------
 
-  /// In-memory, non-serialized dual-key side table recording the declaring type (TyconRef) that was active in the
-  /// type-checker's family region when an inner lambda was created.
+  /// In-memory, non-serialized dual-key side table recording, for each inner lambda, the declaring type (TyconRef)
+  /// that was active in the type-checker's family region when the lambda was created, together with the count of
+  /// the closure's generic-signature type parameters that are inherited from the home type (i.e. that were also
+  /// declared on the home family type).
   ///
   /// The record carries two separate indexes into the same logical table:
   ///
@@ -1485,34 +1500,52 @@ type TcGlobals(
   ///   exists, by re-lookup via the Unique recorded earlier.
   ///
   /// The type-checker (TcIteratedLambdas) captures `env.eFamilyType` at the last point the enclosing type is
-  /// known, and records it here keyed by the lambda's unique. Later, in the let/letrec-binding path, the same TyconRef
-  /// is copied to the `byVal` entry as soon as the bound Val exists. The optimizer's
-  /// MakeTopLevelRepresentationDecisions then threads the table and can look it up by either key.
+  /// known and computes the inherited-typar count from the closure's generic signature (domainTy and resultTy).
+  /// Later, in the let/letrec-binding path, the same recording is copied to the `byVal` entry as soon as the
+  /// bound Val exists. The optimizer's MakeTopLevelRepresentationDecisions threads the table and can look it up
+  /// by either key.
   ///
   /// This is purely intra-compilation metadata and is never written into any pickled type, so it is invisible
   /// to the pickle machinery.
   member val closureHomes: ClosureHomes = { byVal = Map.empty; byUnique = Map.empty } with get, set
 
-  /// Record the declaring type of the lambda with Unique id 'uniqueId' as 'tyconRef'.
+  /// Record the declaring type of the lambda with Unique id 'uniqueId' as 'tyconRef', along with
+  /// 'inheritedHomeTyparCount', the number of the closure's generic-signature type parameters that are also
+  /// type parameters of the home type.
   /// This is the only key available at TcIteratedLambdas time, before any let/letrec binding has been introduced.
-  member this.RecordClosureHome(uniqueId: Unique, tyconRef: TyconRef) =
-      let byUnique = Map.add uniqueId tyconRef this.closureHomes.byUnique
+  member this.RecordClosureHome(uniqueId: Unique, tyconRef: TyconRef, inheritedHomeTyparCount: int) =
+      let entry = { tycon = tyconRef; inheritedHomeTyparCount = inheritedHomeTyparCount }
+      let byUnique = Map.add uniqueId entry this.closureHomes.byUnique
       this.closureHomes <- { this.closureHomes with byUnique = byUnique }
 
-  /// Record the declaring type of the bound 'val' as 'tyconRef', tying the stable Val identity (by its Stamp) to the
-  /// homing type. Called at let/letrec-binding time once the bound Val actually exists.
-  member this.RecordClosureHomeForVal(theBoundVal: Val, tyconRef: TyconRef) =
-      let byVal = Map.add theBoundVal.Stamp tyconRef this.closureHomes.byVal
+  /// Record the declaring type of the bound 'val' as 'tyconRef', along with 'inheritedHomeTyparCount'. This
+  /// ties the stable Val identity (by its Stamp) to the homing type. Called at let/letrec-binding time once the
+  /// bound Val actually exists.
+  member this.RecordClosureHomeForVal(theBoundVal: Val, tyconRef: TyconRef, inheritedHomeTyparCount: int) =
+      let entry = { tycon = tyconRef; inheritedHomeTyparCount = inheritedHomeTyparCount }
+      let byVal = Map.add theBoundVal.Stamp entry this.closureHomes.byVal
       this.closureHomes <- { this.closureHomes with byVal = byVal }
 
   /// Look up the declaring type recorded for the lambda with Unique id 'uniqueId', or None if the lambda was
   /// not created inside a family region (i.e. no declaring type was captured for it).
   member this.ClosureHomeFor(uniqueId: Unique) : TyconRef option =
+      Map.tryFind uniqueId this.closureHomes.byUnique |> Option.map (fun entry -> entry.tycon)
+
+  /// Look up the recording recorded for the lambda with Unique id 'uniqueId', or None if the lambda was not
+  /// created inside a family region. Returns the declaring type alongside how many of the closure's
+  /// generic-signature type parameters were inherited from the declaring type.
+  member this.ClosureHomeDetailFor(uniqueId: Unique) : ClosureHomeEntry option =
       Map.tryFind uniqueId this.closureHomes.byUnique
 
   /// Look up the declaring type recorded for the bound 'val', or None if no home has been tied to this Val yet
   /// (e.g. the rhs is not a closure, or the binding has not gone through the let/letrec path that records the home).
   member this.ClosureHomeForVal(theBoundVal: Val) : TyconRef option =
+      Map.tryFind theBoundVal.Stamp this.closureHomes.byVal |> Option.map (fun entry -> entry.tycon)
+
+  /// Look up the recording recorded for the bound 'val', or None if no home has been tied to this Val yet.
+  /// Returns the declaring type alongside how many of the closure's generic-signature type parameters were
+  /// inherited from the declaring type.
+  member this.ClosureHomeDetailForVal(theBoundVal: Val) : ClosureHomeEntry option =
       Map.tryFind theBoundVal.Stamp this.closureHomes.byVal
 
   /// Drop all recorded closure homes for the compiled unit. Mirrors ClearExtensionOperatorSolutions: FSI reuses

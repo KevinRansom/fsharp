@@ -6730,9 +6730,26 @@ and TcIteratedLambdas (cenv: cenv) isFirst (env: TcEnv) overallTy takenNames tpe
         // Remember the declaring type captured above, keyed by this lambda's fresh unique id.
         // The optimizer's MakeTopLevelRepresentationDecisions threads the same TcGlobals side table
         // and may look it up by this id. Neither the table nor its values are ever serialized.
+        //
+        // Along with the home type we also count, among the closure's generic-signature type parameters
+        // (those free in domainTy or resultTy), how many are also declared on the home type itself —
+        // i.e. which type parameters of the closure were inherited from the declaring (home) family
+        // type rather than inferred or declared locally on the method. This is exposed through the
+        // TcGlobals side table and is never serialized.
         match homeTypeOpt, expr with
-        | Some tyconRef, Expr.Lambda (unique, _, _, _, _, _, _) ->
-            g.RecordClosureHome(unique, tyconRef)
+        | Some homeTycon, Expr.Lambda (unique, _, _, _, _, _, _) ->
+            let closureSigTypars =
+                Zset.union ((freeInType CollectAllNoCaching domainTy).FreeTypars)
+                           ((freeInType CollectAllNoCaching resultTy).FreeTypars)
+            let inheritedCount =
+                match homeTycon.TryDeref with
+                | ValueSome homeEntity ->
+                    let homeTypars = homeEntity.Typars
+                    closureSigTypars
+                    |> Zset.filter (fun tp -> homeTypars |> List.exists (fun htp -> htp.Stamp = tp.Stamp))
+                    |> Zset.count
+                | ValueNone -> 0
+            g.RecordClosureHome(unique, homeTycon, inheritedCount)
         | _, _ -> ()
         expr, tpenv
 
@@ -12182,9 +12199,9 @@ and TcLetBinding (cenv: cenv) isUse env containerInfo declKind tpenv (synBinds, 
         FoldExpr closureHomeFolder () rhsExpr |> ignore
         match foundLambda with
         | Some u ->
-            match g.ClosureHomeFor u with
+            match g.ClosureHomeDetailFor u with
             | Some home ->
-                NameMap.iter (fun (v, _) -> g.RecordClosureHomeForVal(v, home)) values
+                NameMap.iter (fun (v, _) -> g.RecordClosureHomeForVal(v, home.tycon, home.inheritedHomeTyparCount)) values
             | None -> ()
         | None -> ()
 
@@ -13040,8 +13057,8 @@ and TcLetrecBinding
     FoldExpr folder () checkedBind.Expr |> ignore
     match foundLambda with
     | Some u ->
-        match g.ClosureHomeFor u with
-        | Some home -> g.RecordClosureHomeForVal(vspec, home)
+        match g.ClosureHomeDetailFor u with
+        | Some home -> g.RecordClosureHomeForVal(vspec, home.tycon, home.inheritedHomeTyparCount)
         | None -> ()
     | None -> ()
 

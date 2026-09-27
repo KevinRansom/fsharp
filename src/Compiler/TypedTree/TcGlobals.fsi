@@ -135,8 +135,19 @@ val internal tname_RuntimeArgumentHandle: string = "System.RuntimeArgumentHandle
 [<Literal>]
 val internal tname_IsByRefLikeAttribute: string = "System.Runtime.CompilerServices.IsByRefLikeAttribute"
 
+/// A single recorded closure home. Carries the declaring type (`tycon`) together with the count
+/// (`inheritedHomeTyparCount`) of the closure's generic-signature type parameters that are also type parameters
+/// of the declaring (home) family type — i.e. those inherited from the home rather than inferred or declared
+/// locally on the method where the closure was discovered. Not serialized.
+type internal ClosureHomeEntry =
+    {
+        tycon                 : TypedTree.TyconRef
+        inheritedHomeTyparCount : int
+    }
+
 /// In-memory, non-serialized dual-key side table recording the declaring type of an inner lambda at the point
-/// where the type-checker released the enclosing family region (i.e. the last point the "home" was known for it).
+/// where the type-checker released the enclosing family region (i.e. the last point the "home" was known for it),
+/// together with how many of the closure's generic-signature type parameters were inherited from that home type.
 ///
 /// Two views into the same logical table:
 ///
@@ -148,8 +159,8 @@ val internal tname_IsByRefLikeAttribute: string = "System.Runtime.CompilerServic
 /// Visible to the optimizer via the shared TcGlobals; never written into any pickle.
 type internal ClosureHomes =
     {
-        byVal    : Map<TypedTree.Stamp, TypedTree.TyconRef>
-        byUnique : Map<CompilerGlobalState.Unique, TypedTree.TyconRef>
+        byVal    : Map<TypedTree.Stamp, ClosureHomeEntry>
+        byUnique : Map<CompilerGlobalState.Unique, ClosureHomeEntry>
     }
 
 type internal TcGlobals =
@@ -271,18 +282,29 @@ type internal TcGlobals =
 
     /// Record the declaring type of the lambda with 'uniqueId' as 'tyconRef'. Only the Unique key is available
     /// at TcIteratedLambdas time (before any let/letrec binding has been introduced).
-    member RecordClosureHome: uniqueId: CompilerGlobalState.Unique * tyconRef: TypedTree.TyconRef -> unit
+    member RecordClosureHome: uniqueId: CompilerGlobalState.Unique * tyconRef: TypedTree.TyconRef * inheritedHomeTyparCount: int -> unit
 
     /// Record the declaring type of a bound 'val' as 'tyconRef', tying the stable Val identity (by Stamp) to the
     /// homing type. Called at let/letrec-binding time once the bound Val actually exists.
-    member RecordClosureHomeForVal: theBoundVal: TypedTree.Val * tyconRef: TypedTree.TyconRef -> unit
+    /// Record the declaring type of a bound 'val' as 'tyconRef', along with 'inheritedHomeTyparCount', tying the
+    /// stable Val identity (by Stamp) to the homing type. Called at let/letrec-binding time once the bound Val
+    /// actually exists.
+    member RecordClosureHomeForVal: theBoundVal: TypedTree.Val * tyconRef: TypedTree.TyconRef * inheritedHomeTyparCount: int -> unit
 
     /// Look up the declaring type recorded for the lambda with 'uniqueId', or None if no declaring type was
     /// captured for it (i.e. it was not created inside a family region).
     member ClosureHomeFor: uniqueId: CompilerGlobalState.Unique -> TypedTree.TyconRef option
 
+    /// Look up the full home recording (declaring type and inherited-typar count) recorded for the lambda with
+    /// 'uniqueId', or None if no declaring type was captured for it.
+    member ClosureHomeDetailFor: uniqueId: CompilerGlobalState.Unique -> ClosureHomeEntry option
+
     /// Look up the declaring type recorded for a bound 'val', or None if no home has been tied to it yet.
     member ClosureHomeForVal: theBoundVal: TypedTree.Val -> TypedTree.TyconRef option
+
+    /// Look up the full home recording (declaring type and inherited-typar count) recorded for a bound 'val', or
+    /// None if no home has been tied to it yet.
+    member ClosureHomeDetailForVal: theBoundVal: TypedTree.Val -> ClosureHomeEntry option
 
     /// Drop all recorded closure homes. Called at each FSI fragment boundary so a shared TcGlobals does not leak
     /// one submission's records into the next. Batch (fsc) compilation may do the same at the file boundary.
