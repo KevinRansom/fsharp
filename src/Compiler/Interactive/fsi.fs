@@ -2320,6 +2320,11 @@ type internal FsiDynamicCompiler
         // tell apart from the current fragment, poisoning a later same-shaped submission.
         tcGlobals.ClearExtensionOperatorSolutions(tcState.Ccu)
 
+        // Closure homes recorded by the type-checker for a prior FSI fragment must not leak into the
+        // next one: TcGlobals is reused across submissions, and the optimizer's homing decisions for the
+        // current fragment would otherwise see stale byUnique / byVal entries.
+        tcGlobals.ClearClosureHomes()
+
         let eagerFormat (diag: PhasedDiagnostic) = diag.EagerlyFormatCore true
 
         // Typecheck. The lock stops the type checker running at the same time as the
