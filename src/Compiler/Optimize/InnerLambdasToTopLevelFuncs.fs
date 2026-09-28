@@ -24,6 +24,12 @@ open FSharp.Compiler.TcGlobals
 
 let verboseTLR = false
 
+#if DEBUG
+let envPackVerbose = (try System.Environment.GetEnvironmentVariable "FSharp_TLRVerbose" <> null with _ -> false)
+#else
+let envPackVerbose = false
+#endif
+
 //-------------------------------------------------------------------------
 // library helpers
 //-------------------------------------------------------------------------
@@ -1379,6 +1385,32 @@ let RecreateUniqueBounds g expr =
     copyImplFile g OnlyCloneExprVals expr
 
 //-------------------------------------------------------------------------
+// debug: dump envPackM
+//-------------------------------------------------------------------------
+
+#if DEBUG
+/// Debug dump of the packed environments (envPackM), per fclass.
+/// Print ep_etps, ep_aenvs, ep_pack, ep_unpack using the DebugPrint layouts,
+/// in the same style as the debugger's results view:
+///   ep_etps  = [T; U]
+///   ep_aenvs = [x]
+///   ep_pack  = [aenv = <expr>; ...]
+///   ep_unpack = [v = <expr>; ...]
+let DumpEnvPackM (envPackM: Zmap<BindingGroupSharingSameReqdItems, PackedReqdItems>) =
+    dprintf "DumpEnvPackM------\n"
+    let showBindingList bs = showL (listL bindingL bs)
+    let showValList vs = showL (listL valL vs)
+    let showTyparList tps = showL (listL typarL tps)
+    for KeyValue(fc, ep) in envPackM do
+        dprintf "fclass         =%s\n" (string fc)
+        dprintf "  ep_etps      =%s\n" (showTyparList ep.ep_etps)
+        dprintf "  ep_aenvs     =%s\n" (showValList ep.ep_aenvs)
+        dprintf "  ep_pack      =%s\n" (showBindingList ep.ep_pack)
+        dprintf "  ep_unpack    =%s\n" (showBindingList ep.ep_unpack)
+    dprintf "DumpEnvPackM------\n"
+#endif
+
+//-------------------------------------------------------------------------
 // entry point
 //-------------------------------------------------------------------------
 
@@ -1392,6 +1424,9 @@ let MakeTopLevelRepresentationDecisions amap (scope: PerFileNamingScope) ccu g e
 
       // pass3
       let envPackM = ChooseReqdItemPackings g fclassM topValS  declist reqdItemsMap
+      #if DEBUG
+      if envPackVerbose then DumpEnvPackM envPackM
+      #endif
       let fHatM = CreateNewValuesForTLR scope g tlrS arityM fclassM envPackM
 
       // pass4: rewrite
