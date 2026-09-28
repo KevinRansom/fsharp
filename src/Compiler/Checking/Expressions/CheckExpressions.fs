@@ -6726,6 +6726,7 @@ and TcIteratedLambdas (cenv: cenv) isFirst (env: TcEnv) overallTy takenNames tpe
         byrefs |> Map.iter (fun _ (orig, v) ->
             if not orig && isByrefTy g v.Type then errorR(Error(FSComp.SR.tcParameterInferredByref (RichText.mkParameter v.DisplayName), v.Range)))
 
+        let _bodyExprString = string bodyExpr 
         let expr = mkMultiLambda m vspecs (bodyExpr, resultTy)
         // Remember the declaring type captured above, keyed by this lambda's fresh unique id.
         // The optimizer's MakeTopLevelRepresentationDecisions threads the same TcGlobals side table
@@ -6736,6 +6737,7 @@ and TcIteratedLambdas (cenv: cenv) isFirst (env: TcEnv) overallTy takenNames tpe
         // i.e. which type parameters of the closure were inherited from the declaring (home) family
         // type rather than inferred or declared locally on the method. This is exposed through the
         // TcGlobals side table and is never serialized.
+        let _exprString = string expr 
         match homeTypeOpt, expr with
         | Some homeTycon, Expr.Lambda (unique, _, _, _, _, _, _) ->
             let closureSigTypars =
@@ -6744,9 +6746,18 @@ and TcIteratedLambdas (cenv: cenv) isFirst (env: TcEnv) overallTy takenNames tpe
             let inheritedCount =
                 match homeTycon.TryDeref with
                 | ValueSome homeEntity ->
-                    let homeTypars = homeEntity.Typars
+                    // The closure's generic-signature typars were minted by 'copyTypars false' of the home
+                    // type's typars at the time we entered the family region. 'copyTypar' preserves the
+                    // Ident (text and range) but mints a fresh 'typar_stamp', so stamp-equality does *not*
+                    // link a closure typar back to its home typar. The Ident (in particular the displayed
+                    // name) does, and type-parameter names are unique within a type scope (a method typar
+                    // with the same name as a class typar is a compiler error), so we line up by name.
+                    let homeTyparNames =
+                        homeEntity.Typars
+                        |> List.map (fun tp -> tp.Name)
+                        |> Set.ofList
                     closureSigTypars
-                    |> Zset.filter (fun tp -> homeTypars |> List.exists (fun htp -> htp.Stamp = tp.Stamp))
+                    |> Zset.filter (fun tp -> Set.contains tp.Name homeTyparNames)
                     |> Zset.count
                 | ValueNone -> 0
             g.RecordClosureHome(unique, homeTycon, inheritedCount)
