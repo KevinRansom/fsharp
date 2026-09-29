@@ -24,12 +24,6 @@ open FSharp.Compiler.TcGlobals
 
 let verboseTLR = false
 
-#if DEBUG
-let envPackVerbose = (try System.Environment.GetEnvironmentVariable "FSharp_TLRVerbose" <> null with _ -> false)
-#else
-let envPackVerbose = false
-#endif
-
 //-------------------------------------------------------------------------
 // library helpers
 //-------------------------------------------------------------------------
@@ -652,7 +646,7 @@ module Pass2_DetermineReqdItems =
             dprintf "CLASS=%A\n env=%A\n" fc  env
 #endif
 
-    let DetermineReqdItems (tlrS, arityM) expr =
+    let DetermineReqdItems (g: TcGlobals) (tlrS, arityM) expr =
         if verboseTLR then dprintf "DetermineReqdItems------\n"
         let folder = {ExprFolder0 with exprIntercept = ExprEnvIntercept (tlrS, arityM)}
         let z = state0
@@ -669,8 +663,54 @@ module Pass2_DetermineReqdItems =
 #endif
         // close the reqdTypars under the subEnv reln
         let reqdItemsMap = CloseReqdTypars fclassM reqdItemsMap
+
         // filter out trivial fclass - with no TLR defns
         let reqdItemsMap = Zmap.remove (BindingGroupSharingSameReqdItems []) reqdItemsMap
+
+        // realsig: the TLR f becomes a static method on the hosting type, so the
+        // free typars inherited from the hosting type (those whose name is also a
+        // typar of the hosting type) are bound by the surrounding type and are NOT
+        // method-generic args. Trim them; the remainder are the method generic args.
+        let reqdItemsMap =
+            if g.realsig then
+                #if DEBUG
+                if verboseTLR then
+                    dprintf "TRIM realsig path ACTIVE\n"
+                    for fc in Zmap.keys reqdItemsMap do
+                        for v in fc.Vals do
+                            let home = g.ClosureHomeForVal v
+                            let homeNames =
+                                match home with
+                                | Some tcr -> (match tcr.TryDeref with | ValueSome e -> e.Typars |> List.map (fun tp -> tp.Name) |> String.concat "|" | _ -> "<underef>")
+                                | None -> "<none>"
+                            dprintf "  v=%s home=%s\n" v.LogicalName homeNames
+                #endif
+                let homeTyparNames (tcref: TyconRef) =
+                    match tcref.TryDeref with
+                    | ValueSome ent -> (ent.Typars |> List.map (fun tp -> tp.Name) |> Set.ofList)
+                    | _ -> Set.empty
+                let trimHomeTypars (fc: BindingGroupSharingSameReqdItems) (env: ReqdItemsForDefn) =
+                    let homeNameS =
+                        fc.Vals
+                        |> List.map (fun v -> g.ClosureHomeForVal v)
+                        |> List.choose id
+                        |> List.map homeTyparNames
+                        |> List.fold Set.union Set.empty
+                    if Set.isEmpty homeNameS then
+                        env
+                    else
+                        let env = { env with
+                                        reqdTypars = env.reqdTypars
+                                        |> Zset.filter (fun tp -> not (Set.contains tp.Name homeNameS)) }
+                        env
+                let reqdItemsMap = Zmap.mapi trimHomeTypars reqdItemsMap
+                #if DEBUG
+                if verboseTLR then DumpReqdValMap reqdItemsMap
+                #endif
+                reqdItemsMap
+            else
+                reqdItemsMap
+
         // restrict declist to those with reqdItemsMap bindings (the non-trivial ones)
         let declist = List.filter (Zmap.memberOf reqdItemsMap) declist
 #if DEBUG
@@ -1385,32 +1425,6 @@ let RecreateUniqueBounds g expr =
     copyImplFile g OnlyCloneExprVals expr
 
 //-------------------------------------------------------------------------
-// debug: dump envPackM
-//-------------------------------------------------------------------------
-
-#if DEBUG
-/// Debug dump of the packed environments (envPackM), per fclass.
-/// Print ep_etps, ep_aenvs, ep_pack, ep_unpack using the DebugPrint layouts,
-/// in the same style as the debugger's results view:
-///   ep_etps  = [T; U]
-///   ep_aenvs = [x]
-///   ep_pack  = [aenv = <expr>; ...]
-///   ep_unpack = [v = <expr>; ...]
-let DumpEnvPackM (envPackM: Zmap<BindingGroupSharingSameReqdItems, PackedReqdItems>) =
-    dprintf "DumpEnvPackM------\n"
-    let showBindingList bs = showL (listL bindingL bs)
-    let showValList vs = showL (listL valL vs)
-    let showTyparList tps = showL (listL typarL tps)
-    for KeyValue(fc, ep) in envPackM do
-        dprintf "fclass         =%s\n" (string fc)
-        dprintf "  ep_etps      =%s\n" (showTyparList ep.ep_etps)
-        dprintf "  ep_aenvs     =%s\n" (showValList ep.ep_aenvs)
-        dprintf "  ep_pack      =%s\n" (showBindingList ep.ep_pack)
-        dprintf "  ep_unpack    =%s\n" (showBindingList ep.ep_unpack)
-    dprintf "DumpEnvPackM------\n"
-#endif
-
-//-------------------------------------------------------------------------
 // entry point
 //-------------------------------------------------------------------------
 
@@ -1420,13 +1434,10 @@ let MakeTopLevelRepresentationDecisions amap (scope: PerFileNamingScope) ccu g e
       let tlrS, topValS, arityM = Pass1_DetermineTLRAndArities.DetermineTLRAndArities amap g expr
 
       // pass2: determine the typar/freevar closures, f->fclass and fclass declist
-      let reqdItemsMap, fclassM, declist, recShortCallS = Pass2_DetermineReqdItems.DetermineReqdItems (tlrS, arityM) expr
+      let reqdItemsMap, fclassM, declist, recShortCallS = Pass2_DetermineReqdItems.DetermineReqdItems g (tlrS, arityM) expr
 
       // pass3
       let envPackM = ChooseReqdItemPackings g fclassM topValS  declist reqdItemsMap
-      #if DEBUG
-      if envPackVerbose then DumpEnvPackM envPackM
-      #endif
       let fHatM = CreateNewValuesForTLR scope g tlrS arityM fclassM envPackM
 
       // pass4: rewrite
