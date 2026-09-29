@@ -6731,44 +6731,8 @@ and TcIteratedLambdas (cenv: cenv) isFirst (env: TcEnv) overallTy takenNames tpe
         // The optimizer's MakeTopLevelRepresentationDecisions threads the same TcGlobals side table
         // and may look it up by this id. Neither the table nor its values are ever serialized.
         match homeTypeOpt, expr with
-        | Some homeTycon, Expr.Lambda (unique, _, _, _, body, _, _) ->
-            // inheritedHomeTyparCount is the number of distinct home-typar names among the
-            // closure's free typars. 'Free typars' here means the union of (a) the
-            // generic-signature typars (free in domainTy or resultTy) and (b) the free
-            // typars of the lambda body: a helper whose signature carries no typars but
-            // whose body reads a home-typar-typed field (e.g. `unit -> bool` reading
-            // `'T`-typed state) still inherits a home typar.
-            //
-            // Matching is by name, not by Typar.Stamp: each lambda's typars are minted
-            // by `copyTypars false` of the home typars, which preserves the Ident (text
-            // and range) but mints a fresh stamp, so identity-based matching would
-            // silently fail. Type-parameter names are unique within a type scope
-            // (a method typar with the same name as a class typar is a compiler error).
-            //
-            // Dedup by name, not by typar identity: nested lambdas (e.g. `let rec
-            // takeOuter` nested inside `takeInner`) each mint their own copies of the
-            // inherited typars with distinct stamps but the same name, so collecting
-            // distinct objects would inflate the count.
-            let closureTypars =
-                let sigTyvars =
-                    Zset.union ((freeInType CollectAllNoCaching domainTy).FreeTypars)
-                               ((freeInType CollectAllNoCaching resultTy).FreeTypars)
-                Zset.union sigTyvars ((freeInExpr CollectTypars body).FreeTyvars.FreeTypars)
-            let inheritedCount =
-                match homeTycon.TryDeref with
-                | ValueSome homeEntity ->
-                    let homeTyparNames = homeEntity.Typars |> List.map (fun tp -> tp.Name)
-                    closureTypars
-                    // Compiler-generated (inference) typars can carry a name that collides
-                    // with a home typar after generalization; exclude them.
-                    |> Zset.filter (fun tp -> not tp.IsCompilerGenerated)
-                    |> Zset.elements
-                    |> List.map (fun tp -> tp.Name)
-                    |> List.filter (fun name -> homeTyparNames |> List.exists (fun h -> h = name))
-                    |> List.distinct
-                    |> List.length
-                | ValueNone -> 0
-            g.RecordClosureHome(unique, homeTycon, inheritedCount)
+        | Some tyconRef, Expr.Lambda (unique, _, _, _, _, _, _) ->
+            g.RecordClosureHome(unique, tyconRef)
         | _, _ -> ()
         expr, tpenv
 
@@ -12218,9 +12182,9 @@ and TcLetBinding (cenv: cenv) isUse env containerInfo declKind tpenv (synBinds, 
         FoldExpr closureHomeFolder () rhsExpr |> ignore
         match foundLambda with
         | Some u ->
-            match g.ClosureHomeDetailFor u with
+            match g.ClosureHomeFor u with
             | Some home ->
-                NameMap.iter (fun (v, _) -> g.RecordClosureHomeForVal(v, home.tycon, home.inheritedHomeTyparCount)) values
+                NameMap.iter (fun (v, _) -> g.RecordClosureHomeForVal(v, home)) values
             | None -> ()
         | None -> ()
 
@@ -13076,8 +13040,8 @@ and TcLetrecBinding
     FoldExpr folder () checkedBind.Expr |> ignore
     match foundLambda with
     | Some u ->
-        match g.ClosureHomeDetailFor u with
-        | Some home -> g.RecordClosureHomeForVal(vspec, home.tycon, home.inheritedHomeTyparCount)
+        match g.ClosureHomeFor u with
+        | Some home -> g.RecordClosureHomeForVal(vspec, home)
         | None -> ()
     | None -> ()
 
