@@ -194,18 +194,46 @@ let mkTyparTy (tp:Typar) =
     | TyparKind.Type -> tp.AsType KnownWithoutNull
     | TyparKind.Measure -> TType_measure (Measure.Var tp)
 
+#if DEBUG
+open FSharp.Compiler.AbstractIL.Diagnostics
+#endif
+
 // For fresh type variables clear the StaticReq when copying because the requirement will be re-established through the
 // process of type inference.
 let copyTypar clearStaticReq (tp: Typar) =
+#if DEBUG
+    if System.Environment.GetEnvironmentVariable("FSharp_CopyTyparTrace") = "1" then
+        let cs = tp.typar_opt_data |> Option.map (fun tg -> tg.typar_constraints) |> Option.defaultValue []
+        let hasCo = cs |> List.exists (function TyparConstraint.CoercesTo _ -> true | _ -> false)
+        if hasCo then
+            let mutable stamps : string list = []
+            let rec gather ty =
+                match ty with
+                | TType_var(tp, _) -> stamps <- (string tp.Stamp) :: stamps
+                | TType_app(_, args, _) -> args |> List.iter gather
+                | _ -> ()
+            cs |> List.iter (function
+                | TyparConstraint.CoercesTo(ty, _) -> gather ty
+                | _ -> ())
+            System.Console.Error.WriteLine(sprintf "copyTypar NEW stamp=%d name=%s -> constraintRefs=[ %s ] range=[ %s ]" tp.typar_stamp tp.Name (String.concat ", " (List.rev stamps)) (tp.Range.ToString()))
+#endif
     let optData = tp.typar_opt_data |> Option.map (fun tg -> { typar_il_name = tg.typar_il_name; typar_xmldoc = tg.typar_xmldoc; typar_constraints = tg.typar_constraints; typar_attribs = tg.typar_attribs; typar_is_contravariant = tg.typar_is_contravariant; typar_declared_name = tg.typar_declared_name })
     let flags = if clearStaticReq then tp.typar_flags.WithStaticReq(TyparStaticReq.None) else tp.typar_flags
-    Typar.New { typar_id = tp.typar_id
+    let newtp =
+        Typar.New {
+                typar_id = tp.typar_id
                 typar_flags = flags
                 typar_stamp = newStamp()
                 typar_solution = tp.typar_solution
                 typar_astype = Unchecked.defaultof<_>
                 // Be careful to clone the mutable optional data too
                 typar_opt_data = optData }
+
+#if DEBUG
+    if System.Environment.GetEnvironmentVariable("FSharp_CopyTyparTrace") = "1" then
+        System.Console.Error.WriteLine(sprintf "copyTypar old [ stamp=%d name=%s] new [ stamp=%d name=%s]" tp.typar_stamp tp.Name newtp.typar_stamp newtp.Name)
+#endif
+    newtp
 
 let copyTypars clearStaticReq tps = List.map (copyTypar clearStaticReq) tps
 

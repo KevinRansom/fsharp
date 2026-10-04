@@ -2552,6 +2552,21 @@ type Typar =
 
     /// Adjusts the constraints associated with a type variable
     member x.SetConstraints cs =
+#if DEBUG
+        if System.Environment.GetEnvironmentVariable("FSharp_CopyTyparTrace") = "1" then
+            let hasCo = cs |> List.exists (function TyparConstraint.CoercesTo _ -> true | _ -> false)
+            if hasCo then
+                let mutable stamps : string list = []
+                let rec gather ty =
+                    match ty with
+                    | TType_var(tp, _) -> stamps <- (string tp.Stamp) :: stamps
+                    | TType_app(_, args, _) -> args |> List.iter gather
+                    | _ -> ()
+                cs |> List.iter (function
+                    | TyparConstraint.CoercesTo(ty, _) -> gather ty
+                    | _ -> ())
+                System.Console.Error.WriteLine(sprintf "SetConstraints stamp=%d name=%s typeRefs=[ %s ] range = [ %s ]" x.Stamp x.Name (String.concat ", " (List.rev stamps)) (x.Range.ToString()))
+#endif
         match cs, x.typar_opt_data with
         | [], None -> ()
         | [], Some { typar_il_name = None; typar_xmldoc = doc; typar_attribs = [];typar_is_contravariant = false; typar_declared_name = None } when doc.IsEmpty ->
