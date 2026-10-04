@@ -917,6 +917,34 @@ module internal MemberRepresentation =
     type TyparConstraintsWithTypars = (Typar * TyparConstraint) list
 
     module PrettyTypes =
+        // [TRACE PROVENANCE] begin — remove this guard block after diagnosis
+        #if DEBUG
+        /// Collects the stamps of typars referenced by a type (used only for trace logging).
+        let traceGatherTyparStamps ty =
+            let mutable stamps : string list = []
+            let rec g t =
+                match t with
+                | TType_var(p, _) -> stamps <- (string p.Stamp) :: stamps
+                | TType_app(_, a, _) -> a |> List.iter g
+                | _ -> ()
+            g ty
+            stamps
+
+        /// Renders a list of typar constraints to their referenced typar stamps (used only for trace logging).
+        let traceConstraintStamps (cs: TyparConstraint list) =
+            cs
+            |> List.collect (function
+                | TyparConstraint.CoercesTo(ty, _) -> traceGatherTyparStamps ty
+                | TyparConstraint.DefaultsTo(_, ty, _) -> traceGatherTyparStamps ty
+                | TyparConstraint.IsEnum(ty, _) -> traceGatherTyparStamps ty
+                | TyparConstraint.IsDelegate(a, r, _) -> traceGatherTyparStamps a @ traceGatherTyparStamps r
+                | TyparConstraint.SimpleChoice(tys, _) -> tys |> List.collect traceGatherTyparStamps
+                | _ -> [])
+            |> List.rev
+            |> String.concat ", "
+        #endif
+        // [TRACE PROVENANCE] end
+
         let newPrettyTypar (tp: Typar) nm =
             Construct.NewTypar(
                 tp.Kind,
@@ -933,6 +961,28 @@ module internal MemberRepresentation =
             let niceTypars = List.map2 newPrettyTypar tps names
             let tl, _tt = mkTyparToTyparRenaming tps niceTypars in
             let renaming = renaming @ tl
+
+            // [TRACE PROVENANCE] beginning — remove both #if ... #endif guard blocks after diagnosis
+            #if DEBUG
+            (tps, niceTypars)
+            ||> List.iter2 (fun tp tpnice ->
+                let csBefore = tp.Constraints
+                let csAfter = instTyparConstraints renaming csBefore
+                let csBeforeStr = traceConstraintStamps csBefore
+                let csAfterStr = traceConstraintStamps csAfter
+                // [TRACE PROVENANCE]
+                System.Console.Error.WriteLine(
+                    sprintf
+                        "[TRACE PROVENANCE] NewPrettyTypars scope=\"prettyfy path\" inputStamp=%d inputName=%s outputStamp=%d outputName=%s constraintStampsBefore=[ %s ] constraintStampsAfter=[ %s ] stillRefsClassTypar=%b"
+                        tp.Stamp
+                        tp.Name
+                        tpnice.Stamp
+                        tpnice.Name
+                        csBeforeStr
+                        csAfterStr
+                        (csAfterStr.Contains (string tp.Stamp))))
+            #endif
+            // [TRACE PROVENANCE] end
 
             (tps, niceTypars)
             ||> List.iter2 (fun tp tpnice -> tpnice.SetConstraints(instTyparConstraints renaming tp.Constraints))

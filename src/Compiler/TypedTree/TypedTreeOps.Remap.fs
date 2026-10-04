@@ -37,6 +37,33 @@ open FSharp.Compiler.TypeProviders
 [<AutoOpen>]
 module internal TypeRemapping =
 
+    // [TRACE PROVENANCE] begin — remove this whole block, and the [TRACE PROVENANCE] lines in the two bodies, after diagnosis
+    #if DEBUG
+    module TraceProvenance =
+        /// Collects the stamps of typars referenced by a type (only for trace logging).
+        let rec gatherTypes (ty: TType) (acc: string list) =
+            match ty with
+            | TType_var(p, _) -> (string p.Stamp) :: acc
+            | TType_app(_, a, _) -> a |> List.fold (fun acc t -> gatherTypes t acc) acc
+            | TType_tuple(_, l) -> l |> List.fold (fun acc t -> gatherTypes t acc) acc
+            | TType_anon(_, l) -> l |> List.fold (fun acc t -> gatherTypes t acc) acc
+            | TType_fun(d, r, _) -> gatherTypes r (gatherTypes d acc)
+            | TType_forall(_, r) -> gatherTypes r acc
+            | _ -> acc
+        /// Renders constraints to the stamps of typars they reference (only for trace logging).
+        let constraintRefs (cs: TyparConstraint list) : string =
+            cs
+            |> List.collect (function
+                | TyparConstraint.CoercesTo(ty, _) -> gatherTypes ty [] |> List.rev
+                | TyparConstraint.DefaultsTo(_, ty, _) -> gatherTypes ty [] |> List.rev
+                | TyparConstraint.IsEnum(ty, _) -> gatherTypes ty [] |> List.rev
+                | TyparConstraint.IsDelegate(a, r, _) -> (gatherTypes a [] |> List.rev) @ (gatherTypes r [] |> List.rev)
+                | TyparConstraint.SimpleChoice(tys, _) -> tys |> List.collect (fun t -> gatherTypes t [] |> List.rev)
+                | _ -> [])
+            |> String.concat " "
+    #endif
+    // [TRACE PROVENANCE] end
+
     let inline compareBy (x: 'T | null) (y: 'T | null) ([<InlineIfLambda>] func: 'T -> 'K) =
         match x, y with
         | null, null -> 0
@@ -348,6 +375,8 @@ module internal TypeRemapping =
         | [] -> tpinst
         | _ -> List.map2 (fun tp tyarg -> (tp, tyarg)) tps tyargs @ tpinst
 
+    // [TRACE PROVENANCE] helpers moved to top of module
+
     // This version is used to remap most type parameters, e.g. ones bound at tycons, vals, records
     // See notes below on remapTypeFull for why we have a function that accepts remapAttribs as an argument
     and copyAndRemapAndBindTyparsFull remapAttrib tyenv tps =
@@ -363,7 +392,24 @@ module internal TypeRemapping =
 
             (tps, tpsR)
             ||> List.iter2 (fun tporig tp ->
-                tp.SetConstraints(remapTyparConstraintsAux tyenv tporig.Constraints)
+                let csAfter = remapTyparConstraintsAux tyenv tporig.Constraints
+                // [TRACE PROVENANCE] begin
+                #if DEBUG
+                let csBeforeStr = TraceProvenance.constraintRefs tporig.Constraints
+                let csAfterStr = TraceProvenance.constraintRefs csAfter
+                System.Console.Error.WriteLine(
+                    sprintf
+                        "[TRACE PROVENANCE] copyAndRemapAndBindTyparsFull scope=\"class-env -> method-env remap\" origStamp=%d origName=%s newStamp=%d newName=%s remapTyparApplied=%b constraintStampsBefore=[ %s ] constraintStampsAfter=[ %s ]"
+                        tporig.Stamp
+                        tporig.Name
+                        tp.Stamp
+                        tp.Name
+                        (csBeforeStr <> csAfterStr)
+                        csBeforeStr
+                        csAfterStr)
+                #endif
+                // [TRACE PROVENANCE] end
+                tp.SetConstraints csAfter
                 tp.SetAttribs(tporig.Attribs |> remapAttrib))
 
             tpsR, tyenv

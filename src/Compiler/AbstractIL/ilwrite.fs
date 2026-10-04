@@ -913,6 +913,10 @@ and EmitType cenv env bb ty =
         else (bb.EmitByte et_ARRAY; EmitType cenv env bb ty; EmitArrayShape bb shape)
     | ILType.TypeVar tv ->
         let cgparams = env.EnclosingTyparCount
+#if Debug
+        if System.Environment.GetEnvironmentVariable("FSharp_CopyTyparTrace") = "1" then
+            System.Console.Error.WriteLine(sprintf "EmitTypar [ tp=%s ] [ tv=%d ] [ cgparams=%d ]" ty.BasicQualifiedName tv env.EnclosingTyparCount)
+#endif
         if int32 tv < cgparams then
             bb.EmitByte et_VAR
             bb.EmitZ32 (int32 tv)
