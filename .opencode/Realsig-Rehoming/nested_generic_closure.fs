@@ -238,7 +238,7 @@ namespace Microsoft.FSharp.Core.CompilerServices
 
         /// An optimized object for concatenating a sequence of enumerables
         [<Sealed>]
-        type ConcatEnumerator<'T,'U when 'U :> seq<'T>>(sources: seq<'U>) =
+        type ConcatEnumeratorNew<'T,'U when 'U :> seq<'T>>(sources: seq<'U>) =
             let mutable outerEnum = sources.GetEnumerator()
             let mutable currInnerEnum = IEnumerator.Empty()
 
@@ -341,7 +341,7 @@ namespace Microsoft.FSharp.Core.CompilerServices
         open Microsoft.FSharp.Collections
 
         let x = seq { ArraySegment([|1uy; 2uy; 3uy|]); ArraySegment([|1uy; 2uy; 3uy|]); ArraySegment([|1uy; 2uy; 3uy|]); }
-        let enumerator = new RuntimeHelpers.ConcatEnumerator<_,_>(x) :> IEnumerator
+        let enumerator = new RuntimeHelpers.ConcatEnumeratorNew<_,_>(x) :> IEnumerator
         let rec loop () =
             if enumerator.MoveNext() then
                 printfn $"{enumerator.Current}"

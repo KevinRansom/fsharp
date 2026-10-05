@@ -58,6 +58,7 @@ editor).
   and style guidance).
 - **`setup/`** — NuGet/SDK packaging projects (e.g. `Microsoft.FSharp.SDK`).
 - **`artifacts/`** — Build output (created by the build scripts; not
+  artifacts/Temp - Temporary directory add your temp files and folders here.
   committed).
 
 ## Solutions (`.slnx`)

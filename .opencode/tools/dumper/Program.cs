@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Linq;
 using System.Reflection.Metadata;
@@ -9,15 +9,18 @@ class Program
 {
     static void Main(string[] args)
     {
-        if (args.Length < 3)
+        if (args.Length >= 1 && (args[0] == "--list" || args[0] == "-l"))
         {
-            Console.WriteLine("Usage: dumper <assembly> <class> <method>");
+            ListTypes(args[1]);
             return;
         }
 
-        var asmPath = args[0];
-        var className = args[1];
-        var methodName = args[2];
+        var className = args[0];
+        var methodName = args[1];
+        var asmPath = args[2];
+        Console.WriteLine($"className:{args[0]}");
+        Console.WriteLine($"methodName:{args[1]}");
+        Console.WriteLine($"asmPath:{args[2]}");
 
         using var stream = File.OpenRead(asmPath);
         using var peReader = new PEReader(stream);
@@ -65,14 +68,38 @@ class Program
         }
 
         var methodDef = md.GetMethodDefinition(methodHandle);
+        var attrs = methodDef.Attributes.ToString();
         Console.WriteLine($"\nMethod: {methodName}");
         Console.WriteLine($"Token: 0x{MetadataTokens.GetToken(methodHandle):X8}");
+        Console.WriteLine($"  Attributes: {attrs}");
 
         DumpGenericParameters(md, methodDef.GetGenericParameters());
     }
 
     // ============================================================
-    // Dump generic parameters + constraints
+    // --list mode: print every type, its [g=N] generic count, and its method names
+    // ============================================================
+    static void ListTypes(string asmPath)
+    {
+        using var stream = File.OpenRead(asmPath);
+        using var peReader = new PEReader(stream);
+        var md = peReader.GetMetadataReader();
+
+        foreach (var h in md.TypeDefinitions)
+        {
+            var td = md.GetTypeDefinition(h);
+            var name = md.GetString(td.Name);
+            var ns = md.GetString(td.Namespace);
+            int g = td.GetGenericParameters().Count;
+            var suffix = g > 0 ? $" [g={g}]" : "";
+            var methods = string.Join(", ", td.GetMethods()
+                .Select(mh => md.GetString(md.GetMethodDefinition(mh).Name)));
+            Console.WriteLine($"{ns}.{name}{suffix}  ({methods})");
+        }
+    }
+
+    // ============================================================
+    // Dump generic parameters + constraints (with flags)
     // ============================================================
     static void DumpGenericParameters(MetadataReader md, GenericParameterHandleCollection gps)
     {
@@ -86,8 +113,8 @@ class Program
         {
             var gp = md.GetGenericParameter(gpHandle);
             var gpName = md.GetString(gp.Name);
-
-            Console.WriteLine($"  GP: {gpName} (index {gp.Index})");
+        var flags = gp.Attributes;
+        Console.WriteLine($"  GP: {gpName} (index {gp.Index})  Attr=0x{((int)flags):X8} ({flagsToString((int)flags)})");
 
             foreach (var cHandle in gp.GetConstraints())
             {
@@ -106,7 +133,7 @@ class Program
                     DumpBlob(blob);
 
                     blob = md.GetBlobReader(ts.Signature);
-                    Console.WriteLine($"    Decoded: {DecodeTypeSpec(ref blob, md)}");
+                    DumpDecoded(blob);
                 }
                 else
                 {
@@ -114,6 +141,26 @@ class Program
                 }
             }
         }
+    }
+
+    static string flagsToString(int f)
+    {
+        if (f == 0) return "none";
+        var parts = new System.Collections.Generic.List<string>();
+        // GenericParameterFlag bits (System.Reflection.GenericParameterFlags):
+        //   0x1 Covariant, 0x2 Contravariant, 0x4 ReferenceTypeConstraint,
+        //   0x8 RequireReferenceType, 0x10 DefaultConstructorConstraint,
+        //   0x100 VarianceModifier (bit 8)
+        if ((f & 0x8) != 0) parts.Add("reference-type-constraint");
+        if ((f & 0x4) != 0) parts.Add("require-ref-type");
+        if ((f & 0x10) != 0) parts.Add("default-ctor");
+        if ((f & 0x20) != 0) parts.Add("variance-modifier");
+        return string.Join(", ", parts);
+    }
+
+    static string DumpDecoded(BlobReader blob)
+    {
+        return $"    Decoded: {DecodeTypeSpec(ref blob)}";
     }
 
     static void DumpBlob(BlobReader reader)
@@ -127,32 +174,30 @@ class Program
     // ============================================================
     // Minimal TypeSpec decoder — stable across all SRM versions
     // ============================================================
-    static string DecodeTypeSpec(ref BlobReader blob, MetadataReader md)
+    static string DecodeTypeSpec(ref BlobReader blob)
     {
         var et = blob.ReadByte(); // ELEMENT_TYPE_*
 
         return et switch
         {
-            0x12 => DecodeClassOrValueType(ref blob, md, "class"),       // ELEMENT_TYPE_CLASS
-            0x11 => DecodeClassOrValueType(ref blob, md, "valuetype"),  // ELEMENT_TYPE_VALUETYPE
-            0x15 => DecodeGenericInst(ref blob, md),                    // ELEMENT_TYPE_GENERICINST
+            0x12 => DecodeClassOrValueType(ref blob, "class"),       // ELEMENT_TYPE_CLASS
+            0x11 => DecodeClassOrValueType(ref blob, "valuetype"),  // ELEMENT_TYPE_VALUETYPE
+            0x15 => DecodeGenericInst(ref blob),                    // ELEMENT_TYPE_GENERICINST
             0x1E => $"mvar({blob.ReadCompressedInteger()})",            // ELEMENT_TYPE_MVAR
             0x13 => $"var({blob.ReadCompressedInteger()})",             // ELEMENT_TYPE_VAR
-            0x1D => $"byref({DecodeTypeSpec(ref blob, md)})",           // ELEMENT_TYPE_BYREF
-            0x1F => $"szarray({DecodeTypeSpec(ref blob, md)})",         // ELEMENT_TYPE_SZARRAY
+            0x1D => $"byref({DecodeTypeSpec(ref blob)})",           // ELEMENT_TYPE_BYREF
+            0x1F => $"szarray({DecodeTypeSpec(ref blob)})",         // ELEMENT_TYPE_SZARRAY
             _    => $"unknown-element-type(0x{et:X2})"
         };
     }
 
-    static string DecodeClassOrValueType(ref BlobReader blob, MetadataReader md, string kind)
+    static string DecodeClassOrValueType(ref BlobReader blob, string kind)
     {
         var token = blob.ReadCompressedInteger();
-        var handle = MetadataTokens.EntityHandle(token);
-
-        return $"{kind}({ResolveTypeName(md, handle)})";
+        return $"{kind}(token=0x{token:X8})";
     }
 
-    static string DecodeGenericInst(ref BlobReader blob, MetadataReader md)
+    static string DecodeGenericInst(ref BlobReader blob)
     {
         var et = blob.ReadByte(); // class or valuetype
         var kind = et == 0x12 ? "class" : "valuetype";
@@ -164,39 +209,8 @@ class Program
 
         var args = new string[arity];
         for (int i = 0; i < arity; i++)
-            args[i] = DecodeTypeSpec(ref blob, md);
+            args[i] = DecodeTypeSpec(ref blob);
 
-        return $"genericinst({kind} {ResolveTypeName(md, typeHandle)}<{string.Join(", ", args)}> )";
-    }
-
-    static string ResolveTypeName(MetadataReader md, EntityHandle handle)
-    {
-        return handle.Kind switch
-        {
-            HandleKind.TypeReference =>
-                ResolveTypeRef(md.GetTypeReference((TypeReferenceHandle)handle), md),
-
-            HandleKind.TypeDefinition =>
-                ResolveTypeDef(md.GetTypeDefinition((TypeDefinitionHandle)handle), md),
-
-            HandleKind.TypeSpecification =>
-                "TypeSpec",
-
-            _ => $"UnknownHandleKind({handle.Kind})"
-        };
-    }
-
-    static string ResolveTypeRef(TypeReference tr, MetadataReader md)
-    {
-        var ns = md.GetString(tr.Namespace);
-        var name = md.GetString(tr.Name);
-        return $"{ns}.{name}";
-    }
-
-    static string ResolveTypeDef(TypeDefinition td, MetadataReader md)
-    {
-        var ns = md.GetString(td.Namespace);
-        var name = md.GetString(td.Name);
-        return $"{ns}.{name}";
+        return $"genericinst({kind} 0x{typeToken:X8}<{string.Join(", ", args)}> )";
     }
 }
