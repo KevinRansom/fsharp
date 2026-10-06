@@ -72,7 +72,8 @@ artifacts\bin\fsc\Debug\net472\fsc.exe --nologo tests\FSharp.Compiler.ComponentT
 
 To evaluate constraint serialization, run the command:
 
-.opencode\Realsig-Rehoming\verifyConstraintBlobs.cmd "artifacts\Temp\RealsigPlusOptimisePlus.exe"
+.opencode\Realsig-Rehoming\verifyRealsigPlusConstraintBlobs.cmd "artifacts\Temp\RealsigPlusOptimisePlus.exe"
+.opencode\Realsig-Rehoming\verifyRealsigMinusConstraintBlobs.cmd "artifacts\Temp\RealsigMinusOptimisePlus.exe"
 
 view the output
 
