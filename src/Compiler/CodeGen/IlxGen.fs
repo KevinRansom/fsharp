@@ -10555,7 +10555,7 @@ and GenMethodForBinding
 
     let homingEnv =
         match g.realsig with
-        |true -> eenvUnderMethTypeTypars   // class typars + method typars, the union the body actually saw
+        | true -> eenvUnderMethTypeTypars //AddTyparsToEnv methLambdaTypars eenv   // class typars + method typars, the union the body actually saw
         | false -> eenvUnderMethLambdaTypars
     let ilTypars = GenGenericParams cenv homingEnv methLambdaTypars
 
