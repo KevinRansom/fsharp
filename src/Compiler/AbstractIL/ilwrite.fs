@@ -351,12 +351,93 @@ type UnsharedRow(elems: RowElement[]) =
 
 // This environment keeps track of how many generic parameters are in scope.
 // This lets us translate AbsIL type variable number to IL type variable numbering
+#if Debug
+// =====================================================================
+// Realsig+ env-threading diagnostic trace.
+// Enable: set FSharp_RealsigEnvTrace=1 (Debug build only).
+//
+// Independent of the pre-existing FSharp_CopyTyparTrace gate (line ~916).
+// =====================================================================
+
+type RealsigTraceCtx = {
+    EntityKind: string   // "TypeDef" | "MethodDef" | "FieldSpec" | "OverrideSpec" | "MethodRef" | "GenericParamConstraint" | "<root>"
+    EntityName: string
+    ClassArity: int
+    MethodArity: int
+    EnvSource: string    // which envFor* produced the current env, or "<none>"
+}
+
+/// Global mutable trace context. The writer is single-threaded; this is
+/// just to let inner emitters (EmitType) attribute themselves to the
+/// currently-active entity without changing any signature.
+let mutable realsigTraceCtx: RealsigTraceCtx =
+    { EntityKind = "<root>"; EntityName = "<root>"; ClassArity = 0; MethodArity = 0; EnvSource = "<none>" }
+
+/// Read the env var exactly once per process (module-level let).
+let realsigTraceEnabled = (System.Environment.GetEnvironmentVariable "FSharp_RealsigEnvTrace" = "1")
+
+/// Log a single trace line to stderr. Zero-cost when disabled.
+let realsigLog (msg: string) =
+    if realsigTraceEnabled then
+        let c = realsigTraceCtx
+        System.Console.Error.WriteLine(sprintf "[RealsigTrace] %-12s %s  classArity=%d methodArity=%d envSource=%s  --  %s"
+            c.EntityKind c.EntityName c.ClassArity c.MethodArity c.EnvSource msg)
+
+/// Push a new trace context, run `f`, then restore.
+let withRealsigCtx (kind: string) (name: string) (classArity: int) (methodArity: int) f =
+    if realsigTraceEnabled then
+        let prev = realsigTraceCtx
+        realsigTraceCtx <- { EntityKind=kind; EntityName=name; ClassArity=classArity; MethodArity=methodArity; EnvSource=prev.EnvSource }
+        (try
+             f ()
+         finally
+             realsigTraceCtx <- prev)
+    else
+        f ()
+#endif
+
 type ILTypeWriterEnv = { EnclosingTyparCount: int }
-let envForTypeDef (tdef: ILTypeDef) = { EnclosingTyparCount=tdef.GenericParams.Length }
-let envForMethodRef env (ty: ILType) = { EnclosingTyparCount=(match ty with ILType.Array _ -> env.EnclosingTyparCount | _ -> ty.GenericArgs.Length) }
-let envForNonGenericMethodRef _mref = { EnclosingTyparCount=Int32.MaxValue }
-let envForFieldSpec (fspec: ILFieldSpec) = { EnclosingTyparCount=fspec.DeclaringType.GenericArgs.Length }
-let envForOverrideSpec (ospec: ILOverridesSpec) = { EnclosingTyparCount=ospec.DeclaringType.GenericArgs.Length }
+let envForTypeDef (tdef: ILTypeDef) =
+    let env = { EnclosingTyparCount=tdef.GenericParams.Length }
+#if Debug
+    if realsigTraceEnabled then
+        realsigTraceCtx <- { realsigTraceCtx with EntityKind="TypeDef"; EntityName=tdef.Name; ClassArity=tdef.GenericParams.Length; MethodArity=0; EnvSource="envForTypeDef" }
+        realsigLog (sprintf "EnclosingTyparCount=%d (tdef.GenericParams.Length)" env.EnclosingTyparCount)
+#endif
+    env
+let envForMethodRef env (ty: ILType) =
+    let env' = { EnclosingTyparCount=(match ty with ILType.Array _ -> env.EnclosingTyparCount | _ -> ty.GenericArgs.Length) }
+#if Debug
+    if realsigTraceEnabled then
+        let tyArity = (match ty with ILType.Array _ -> env.EnclosingTyparCount | _ -> ty.GenericArgs.Length)
+        realsigTraceCtx <- { realsigTraceCtx with EntityKind="MethodRef"; EntityName=ty.BasicQualifiedName; ClassArity=tyArity; MethodArity=0; EnvSource="envForMethodRef" }
+        realsigLog (sprintf "EnclosingTyparCount=%d (inherited from parent env or ty.GenericArgs.Length) [parent=%d]" env'.EnclosingTyparCount env.EnclosingTyparCount)
+#endif
+    env'
+let envForNonGenericMethodRef _mref =
+    let env = { EnclosingTyparCount=Int32.MaxValue }
+#if Debug
+    if realsigTraceEnabled then
+        realsigTraceCtx <- { realsigTraceCtx with EntityKind="NonGenericMethodRef"; EntityName="<custom-attr>"; EnvSource="envForNonGenericMethodRef" }
+        realsigLog (sprintf "EnclosingTyparCount=%d (sentinel Int32.MaxValue)" env.EnclosingTyparCount)
+#endif
+    env
+let envForFieldSpec (fspec: ILFieldSpec) =
+    let env = { EnclosingTyparCount=fspec.DeclaringType.GenericArgs.Length }
+#if Debug
+    if realsigTraceEnabled then
+        realsigTraceCtx <- { realsigTraceCtx with EntityKind="FieldSpec"; EntityName=fspec.Name; ClassArity=fspec.DeclaringType.GenericArgs.Length; MethodArity=0; EnvSource="envForFieldSpec" }
+        realsigLog (sprintf "EnclosingTyparCount=%d (DeclaringType=%s, GenericArgs.Length)" env.EnclosingTyparCount (fspec.DeclaringType.BasicQualifiedName))
+#endif
+    env
+let envForOverrideSpec (ospec: ILOverridesSpec) =
+    let env = { EnclosingTyparCount=ospec.DeclaringType.GenericArgs.Length }
+#if Debug
+    if realsigTraceEnabled then
+        realsigTraceCtx <- { realsigTraceCtx with EntityKind="OverrideSpec"; EntityName=ospec.MethodRef.Name; ClassArity=ospec.DeclaringType.GenericArgs.Length; MethodArity=0; EnvSource="envForOverrideSpec" }
+        realsigLog (sprintf "EnclosingTyparCount=%d (DeclaringType=%s, GenericArgs.Length)" env.EnclosingTyparCount (ospec.DeclaringType.BasicQualifiedName))
+#endif
+    env
 
 //---------------------------------------------------------------------
 // TABLES
@@ -916,6 +997,12 @@ and EmitType cenv env bb ty =
 #if Debug
         if System.Environment.GetEnvironmentVariable("FSharp_CopyTyparTrace") = "1" then
             System.Console.Error.WriteLine(sprintf "EmitTypar [ tp=%s ] [ tv=%d ] [ cgparams=%d ]" ty.BasicQualifiedName tv env.EnclosingTyparCount)
+#endif
+#if Debug
+        if realsigTraceEnabled then
+            let encoding = if int32 tv < cgparams then "VAR" else "MVAR"
+            let resolvedIdx = if int32 tv < cgparams then (int32 tv) else (int32 tv - cgparams)
+            realsigLog (sprintf "tv=%d  EnclosingTyparCount=%d  => %s (!%d)   [resolved index=%d, ty=%s]" tv cgparams encoding resolvedIdx resolvedIdx ty.BasicQualifiedName)
 #endif
         if int32 tv < cgparams then
             bb.EmitByte et_VAR
@@ -2576,7 +2663,20 @@ and GenTypeAsGenericParamConstraintRow cenv env gpidx ty =
         [| SimpleIndex (TableNames.GenericParam, gpidx)
            TypeDefOrRefOrSpec (tdorTag, tdorRow) |]
 
+#if Debug
+and realsigLogGenericParamConstraintPass4 (env: ILTypeWriterEnv) (gpidx: int) (ty: ILType) =
+    if realsigTraceEnabled then
+        (withRealsigCtx "GenericParamConstraint" (sprintf "gpidx=%d" gpidx) 0 0 (fun () ->
+            realsigLog (sprintf "constraint type=%s  env.EnclosingTyparCount=%d"
+                ty.BasicQualifiedName env.EnclosingTyparCount)))
+    else
+        ()
+#endif
+
 and GenGenericParamConstraintPass4 cenv env gpidx ty =
+#if Debug
+    realsigLogGenericParamConstraintPass4 env gpidx ty
+#endif
     AddUnsharedRow cenv TableNames.GenericParamConstraint (GenTypeAsGenericParamConstraintRow cenv env gpidx ty) |> ignore
 
 and GenGenericParamPass3 cenv env idx owner gp =
@@ -2796,7 +2896,20 @@ let GenMethodDefPass3 tdef cenv env (mdef: ILMethodDef) =
                       SimpleIndex (TableNames.ModuleRef, GetModuleRefAsIdx cenv attr.Where) |]) |> ignore
         | _ -> ()
 
+#if Debug
+let realsigLogMethodDefPass4 (tdef: ILTypeDef) (mdef: ILMethodDef) (env: ILTypeWriterEnv) =
+    if realsigTraceEnabled then
+        (withRealsigCtx "MethodDef" mdef.Name tdef.GenericParams.Length (List.length mdef.GenericParams) (fun () ->
+            realsigLog (sprintf "env.EnclosingTyparCount=%d  mdef.GenericParams=%d  (threaded from tdef=%s)"
+                env.EnclosingTyparCount (List.length mdef.GenericParams) tdef.Name)))
+    else
+        ()
+#endif
+
 let GenMethodDefPass4 tdef cenv env mdef =
+#if Debug
+    realsigLogMethodDefPass4 tdef mdef env
+#endif
     if canGenMethodDef tdef cenv mdef then
         let midx = GetMethodDefIdx cenv mdef
         List.iteri (fun n gp -> GenGenericParamPass4 cenv env n (tomd_MethodDef, midx) gp) mdef.GenericParams
@@ -2913,6 +3026,7 @@ and GenResourcePass3 cenv rdef =
 
 let rec GenTypeDefPass3 enc cenv (tdef: ILTypeDef) =
    try
+        let _breakPoint = tdef.ToString()
         let env = envForTypeDef tdef
         let tidx = GetIdxForTypeDef cenv (TdKey(enc, tdef.Name))
 
@@ -2955,6 +3069,11 @@ and GenTypeDefsPass3 enc cenv tdefs =
 let rec GenTypeDefPass4 enc cenv (tdef: ILTypeDef) =
    try
         let env = envForTypeDef tdef
+#if Debug
+        let _ = withRealsigCtx "TypeDef" tdef.Name tdef.GenericParams.Length 0 (fun () ->
+            realsigLog (sprintf "env.EnclosingTyparCount=%d  tdef.GenericParams=%d"
+                env.EnclosingTyparCount tdef.GenericParams.Length))
+#endif
         let tidx = GetIdxForTypeDef cenv (TdKey(enc, tdef.Name))
         tdef.Methods |> Seq.iter (GenMethodDefPass4 tdef cenv env)
         List.iteri (fun n gp -> GenGenericParamPass4 cenv env n (tomd_TypeDef, tidx) gp) tdef.GenericParams

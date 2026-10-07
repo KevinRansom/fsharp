@@ -529,20 +529,62 @@ let ComputeTypeAccess (tref: ILTypeRef) hidden (accessibility: Accessibility) re
 // TypeReprEnv
 //--------------------------------------------------------------------------
 
+/// Collect typars referenced by a type, accumulating them into acc.
+let rec private collectTyparsInType (ty: TType) (acc: Map<Stamp, Typar>) =
+    match stripTyparEqns ty with
+    | TType_var(tp, _) -> acc.Add(tp.Stamp, tp)
+    | TType_fun(domainTy, rangeTy, _) ->
+        List.fold (fun acc t -> collectTyparsInType t acc) acc [ domainTy; rangeTy ]
+    | TType_tuple(_, l)
+    | TType_anon(_, l) -> List.fold (fun acc t -> collectTyparsInType t acc) acc l
+    | TType_app(_, tinst, _) -> List.fold (fun acc t -> collectTyparsInType t acc) acc tinst
+    | TType_forall(_, bodyTy) -> collectTyparsInType bodyTy acc
+    | TType_ucase(_, tinst) -> List.fold (fun acc t -> collectTyparsInType t acc) acc tinst
+    | TType_measure _ -> acc
+
+/// Collect typars referenced by a single constraint.
+let private collectTyparsInConstraint (tc: TyparConstraint) (acc: Map<Stamp, Typar>) =
+    match tc with
+    | TyparConstraint.CoercesTo(ty, _) -> collectTyparsInType ty acc
+    | TyparConstraint.DefaultsTo(_, ty, _) -> collectTyparsInType ty acc
+    | TyparConstraint.IsEnum(ty, _) -> collectTyparsInType ty acc
+    | TyparConstraint.SimpleChoice(tys, _) -> List.fold (fun acc t -> collectTyparsInType t acc) acc tys
+    | TyparConstraint.IsDelegate(aty, bty, _) -> collectTyparsInType bty (collectTyparsInType aty acc)
+    | TyparConstraint.SupportsComparison _
+    | TyparConstraint.SupportsEquality _
+    | TyparConstraint.SupportsNull _
+    | TyparConstraint.NotSupportsNull _
+    | TyparConstraint.IsNonNullableStruct _
+    | TyparConstraint.IsReferenceType _
+    | TyparConstraint.IsUnmanaged _
+    | TyparConstraint.AllowsRefStruct _
+    | TyparConstraint.RequiresDefaultConstructor _
+    | TyparConstraint.MayResolveMember _ -> acc
+
+/// Collect all typars referenced by constraints on the given typar.
+let private collectConstraintTypars (tp: Typar) =
+    List.fold (fun acc tc -> collectTyparsInConstraint tc acc) Map.empty tp.Constraints
+
 /// Indicates how type parameters are mapped to IL type variables
 [<NoEquality; NoComparison>]
-type TypeReprEnv
-    (reprs: Map<Stamp, uint16 * Typar>, count: int, templateReplacement: (TyconRef * ILTypeRef * Typars * TyparInstantiation) option) =
+type TypeReprEnv (reprs: Map<Stamp, uint16 * Typar>, count: int, templateReplacement: (TyconRef * ILTypeRef * Typars * TyparInstantiation) option,
+                 constraintTypars: Map<Stamp, Typar>) =
 
-    static let empty = TypeReprEnv(count = 0, reprs = Map.empty, templateReplacement = None)
+    static let empty =
+        TypeReprEnv(
+            count = 0,
+            reprs = Map.empty,
+            templateReplacement = None,
+            constraintTypars = Map.empty
+        )
 
     /// Get the template replacement information used when using struct types for state machines based on a "template" struct
     member _.TemplateReplacement = templateReplacement
 
     member _.WithTemplateReplacement(tcref, ilCloTyRef, cloFreeTyvars, templateTypeInst) =
-        TypeReprEnv(reprs, count, Some(tcref, ilCloTyRef, cloFreeTyvars, templateTypeInst))
+        TypeReprEnv(reprs, count, Some(tcref, ilCloTyRef, cloFreeTyvars, templateTypeInst), constraintTypars)
 
-    member _.WithoutTemplateReplacement() = TypeReprEnv(reprs, count, None)
+    member _.WithoutTemplateReplacement() = TypeReprEnv(reprs, count, None, constraintTypars)
 
     /// Lookup a type parameter
     member _.Item(tp: Typar, m: range) =
@@ -554,13 +596,21 @@ type TypeReprEnv
             uint16 666
 
     /// Check if a type parameter is in the environment
-    member _.ContainsKey(tp: Typar) = reprs.ContainsKey(tp.Stamp)
+    member _.ContainsKey(tp: Typar) =
+        reprs.ContainsKey(tp.Stamp) ||
+        constraintTypars.ContainsKey(tp.Stamp)
 
     /// Add an additional type parameter to the environment. If the parameter is a units-of-measure parameter
     /// then it is ignored, since it doesn't correspond to a .NET type parameter.
     member tyenv.AddOne(tp: Typar) =
         if IsNonErasedTypar tp then
-            TypeReprEnv(reprs.Add(tp.Stamp, (uint16 count, tp)), count + 1, templateReplacement)
+            let constraintTypars =
+                if tp.Constraints.IsEmpty then
+                    constraintTypars
+                else
+                    let newCst = collectConstraintTypars tp
+                    Map.fold (fun acc k v -> acc.Add(k, v)) constraintTypars newCst
+            TypeReprEnv(reprs.Add(tp.Stamp, (uint16 count, tp)), count + 1, templateReplacement, constraintTypars)
         else
             tyenv
 
@@ -571,12 +621,20 @@ type TypeReprEnv
     /// Get the count of the non-erased type parameters in scope.
     member _.Count = count
 
+    /// Get the typars referenced by constraints on typars in the environment, keyed by stamp.
+    member _.ConstraintTypars = constraintTypars
+
     /// Get the empty environment, where no type parameters are in scope.
     static member Empty = empty
 
     /// Reset to the empty environment, where no type parameters are in scope.
     member eenv.ResetTypars() =
-        TypeReprEnv(count = 0, reprs = Map.empty, templateReplacement = eenv.TemplateReplacement)
+        TypeReprEnv(
+            count = 0,
+            reprs = Map.empty,
+            templateReplacement = eenv.TemplateReplacement,
+            constraintTypars = Map.empty
+        )
 
     /// Get the environment for a fixed set of type parameters
     member eenv.ForTypars tps = eenv.ResetTypars().Add tps
@@ -648,6 +706,52 @@ let unionFieldReuseMapping thisUnionTy (cases: UnionCase[]) : UnionFieldReuseMap
 type PtrsOK =
     | PtrTypesOK
     | PtrTypesNotOK
+
+#if DEBUG
+//--------------------------------------------------------------------------
+// FSharp_TyparTrace — typar creation/identity trace at IL emission time.
+// Enable: FSharp_TyparTrace=1 (Debug build only). Zero-cost otherwise.
+//--------------------------------------------------------------------------
+let typarTraceEnabled =
+    (System.Environment.GetEnvironmentVariable("FSharp_TyparTrace") = "1")
+
+/// Print one line per typar emitted as a generic param, plus the stamps of
+/// every typar referenced by its constraints. The triple
+///   (emitted typar .Stamp,  eenv.tyenv.Count,  constraint stamp list)
+/// makes the VAR/MVAR decision visible before the blob is written.
+let emitTyparTraceLine (tp: Typar) (caller: string) =
+    if typarTraceEnabled then
+        let cs =
+            tp.typar_opt_data
+            |> Option.map (fun d -> d.typar_constraints)
+            |> Option.defaultValue []
+        let mutable refs : string list = []
+        let rec gather (ty: TType) =
+            match ty with
+            | TType_var(p, _) -> if p.Stamp <> tp.Stamp then refs <- (string p.Stamp) :: refs
+            | TType_app(_, args, _) -> args |> List.iter gather
+            | TType_measure unt ->
+                unt |> ListMeasureVarOccsWithNonZeroExponents |> List.iter (fun (p, _) -> refs <- (string p.Stamp) :: refs)
+            | _ -> ()
+        cs
+        |> List.iter (function
+            | TyparConstraint.CoercesTo(ty, _) -> gather ty
+            | TyparConstraint.SimpleChoice(tys, _) -> tys |> List.iter gather
+            | _ -> ())
+        System.Console.Error.WriteLine(
+            sprintf "[TyparTrace] site=%s DisplayName=%s stamp=%d rigidity=%A compgen=%b linked=%b solved=%b"
+                caller
+                tp.DisplayName
+                tp.Stamp
+                tp.Rigidity
+                tp.IsCompilerGenerated
+                tp.IsLinked
+                tp.IsSolved)
+        if refs.IsEmpty then
+            System.Console.Error.WriteLine(sprintf "[TyparTrace]   constraintRefs=[ none ]")
+        else
+            System.Console.Error.WriteLine(sprintf "[TyparTrace]   constraintRefs=[ %s ]" (String.concat ", " (List.rev refs)))
+#endif
 
 let rec GenTypeArgAux cenv m tyenv tyarg =
     GenTypeAux cenv m tyenv VoidNotOK PtrTypesNotOK tyarg
@@ -6228,54 +6332,15 @@ and GenDefaultValue cenv cgbuf eenv (ty, m) =
 
 and GenGenericParam cenv eenv (tp: Typar) =
     let g = cenv.g
-
+ 
     #if DEBUG
-    // [TRACE PROVENANCE] dump the typar and every typar it (and its trait solution) references at IL emission time
-    begin
-        let mutable stamps : string list = []
-        let rec gather (ty: TType) =
-            match ty with
-            | TType_var(p, _) -> stamps <- (string p.Stamp) :: stamps
-            | TType_app(_, a, _) -> a |> List.iter gather
-            | TType_measure unt ->
-                unt
-                |> ListMeasureVarOccsWithNonZeroExponents
-                |> List.iter (fun (p, _) -> stamps <- (string p.Stamp) :: stamps)
-            | _ -> ()
-        let slnTy (sl: TraitConstraintSln) =
-            match sl with
-            | ILMethSln(ty, _, _, minst, stOpt) -> gather ty; minst |> List.iter gather; Option.iter gather stOpt
-            | FSMethSln(ty, _, minst, stOpt) -> gather ty; minst |> List.iter gather; Option.iter gather stOpt
-            | FSRecdFieldSln(tinst, _, _) -> tinst |> List.iter gather
-            | FSAnonRecdFieldSln(_, tinst, _) -> tinst |> List.iter gather
-            | _ -> ()
-        let cs = tp.typar_opt_data |> Option.map (fun tg -> tg.typar_constraints) |> Option.defaultValue []
-        cs |> List.iter (function
-            | TyparConstraint.CoercesTo(ty, _) -> gather ty
-            | TyparConstraint.SimpleChoice(tys, _) -> tys |> List.iter gather
-            | TyparConstraint.MayResolveMember(tr, _) ->
-                (let (TTrait(_, _, _, _, _, _, solution, _)) = tr
-                 match solution.Value with Some sl -> slnTy sl | None -> ())
-            | _ -> ())
-        System.Console.Error.WriteLine(sprintf "[TRACE PROVENANCE] GenGenericParam stamp=%d name=%s -> refs=[ %s ] range=[ %s ]" tp.Stamp tp.Name (String.concat ", " (List.rev stamps)) (tp.Range.ToString()))
-    end
-    #endif
-
-    #if DEBUG
-    if System.Environment.GetEnvironmentVariable("FSharp_CopyTyparTrace") = "1" then
-        let cs = tp.typar_opt_data |> Option.map (fun tg -> tg.typar_constraints) |> Option.defaultValue []
-        let hasCo = cs |> List.exists (function TyparConstraint.CoercesTo _ -> true | _ -> false)
-        if hasCo then
-            let mutable stamps : string list = []
-            let rec gather ty =
-                match ty with
-                | TType_var(tp, _) -> stamps <- (string tp.Stamp) :: stamps
-                | TType_app(_, args, _) -> args |> List.iter gather
-                | _ -> ()
-            cs |> List.iter (function
-                | TyparConstraint.CoercesTo(ty, _) -> gather ty
-                | _ -> ())
-            System.Console.Error.WriteLine(sprintf "GenGenericParam stamp=%d name=%s -> constraintRefs=[ %s ] range=[ %s ]" tp.typar_stamp tp.Name (String.concat ", " (List.rev stamps)) (tp.Range.ToString()))
+    if typarTraceEnabled then
+        System.Console.Error.WriteLine(
+            sprintf "[TyparTrace] emit=GenGenericParam eenv.tyenv.Count=%d  eenv.realsig=%b  g.realsig=%b"
+                eenv.tyenv.Count
+                eenv.realsig
+                cenv.g.realsig)
+        emitTyparTraceLine tp "GenGenericParam"
     #endif
 
     let subTypeConstraints =
@@ -10488,7 +10553,11 @@ and GenMethodForBinding
             | _ -> ()
         ]
 
-    let ilTypars = GenGenericParams cenv eenvUnderMethLambdaTypars methLambdaTypars
+    let homingEnv =
+        match g.realsig with
+        |true -> eenvUnderMethTypeTypars   // class typars + method typars, the union the body actually saw
+        | false -> eenvUnderMethLambdaTypars
+    let ilTypars = GenGenericParams cenv homingEnv methLambdaTypars
 
     let slotSigParamFlags =
         match v.ImplementedSlotSigs with
@@ -11115,6 +11184,18 @@ and AllocValReprWithinExpr cenv cgbuf endMark cloc v eenv =
 
     // TLR lifts avoid generic enclosing scopes (#17607). Namespace-root lifts need per-file
     // storage without triggering the file's initialization when a lifted method is called.
+#if DEBUG
+    // Diagnostic: re-homing decision for lifted closures (#realsig+).
+    // Enable: FSharp_RealsigEnvTrace=1 (Debug build only).
+    (if (System.Environment.GetEnvironmentVariable "FSharp_RealsigEnvTrace" = "1")
+        then System.Console.Error.WriteLine(sprintf
+                 "[RealsigTrace] IlxGen.allocation-of-val %s  topLevel=%b  member=%b  realsig=%b
+                    moduleCloc=[%s/%s] cloc=[%s/%s]"
+                 v.LogicalName v.IsCompiledAsTopLevel v.IsMemberOrModuleBinding cenv.g.realsig
+                 (String.Join("/", eenv.moduleCloc.Enclosing)) eenv.moduleCloc.TopImplQualifiedName
+                 (String.Join("/", cloc.Enclosing)) cloc.TopImplQualifiedName)
+     else ())
+#endif
     let effectiveCloc =
         if v.IsCompiledAsTopLevel && not v.IsMemberOrModuleBinding then
             if eenv.moduleCloc.Enclosing.IsEmpty then
