@@ -867,6 +867,22 @@ let CreateNewValuesForTLR (scope: PerFileNamingScope) g tlrS arityM fclassM envP
         let argTys, retTy = stripFunTy g tau
         let newTps = envp.ep_etps @ tps
 
+        #if DEBUG
+        let tlreTraceEnabled = (System.Environment.GetEnvironmentVariable "FSharp_TyparTrace" = "1")
+        if tlreTraceEnabled then
+            // newTps = envp.ep_etps @ tps. Report the AMBIENT (class) typars
+            // (envp.ep_etps, the prefix, indices 0..nEp-1) and the CLOSURE's
+            // OWN typars (tps, the suffix), so the original vs clone stamps
+            // are explicit at the clone site.
+            let nEp = List.length envp.ep_etps
+            newTps
+            |> List.iteri (fun i (newTp: Typar) ->
+                let role = if i < nEp then "AMBIENT-CLASS" else "CLOSURE-OWN"
+                System.Console.Error.WriteLine(
+                    sprintf "[CreateTrace] cloneSite=TLR.createFHat f=%s role=%s newStamp=%d name=%s rigidity=%A compgen=%b realsig=%b"
+                        f.LogicalName role newTp.Stamp newTp.DisplayName newTp.Rigidity newTp.IsCompilerGenerated g.realsig))
+        #endif
+
         let fHatTy =
             let newArgTys = List.map typeOfVal envp.ep_aenvs @ argTys
             mkLambdaTy g newTps newArgTys retTy

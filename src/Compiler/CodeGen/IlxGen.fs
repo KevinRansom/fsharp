@@ -751,6 +751,35 @@ let emitTyparTraceLine (tp: Typar) (caller: string) =
             System.Console.Error.WriteLine(sprintf "[TyparTrace]   constraintRefs=[ none ]")
         else
             System.Console.Error.WriteLine(sprintf "[TyparTrace]   constraintRefs=[ %s ]" (String.concat ", " (List.rev refs)))
+
+/// Resolve one constraint typar the EXACT way GenTypeAux does, but first
+/// log the stamp -> (found/index) decision. This is the single decision that
+/// commits a VAR (ordinal) vs MVAR/fallthrough into the constraint blob.
+let private traceConstraintRefResolution (tyenv: TypeReprEnv) (tp: Typar) (caller: string) =
+    if not (typarTraceEnabled && IsNonErasedTypar tp) then
+        ()
+    else
+        let found = try Some (tyenv[tp, tp.Range]) with _ -> None
+        match found with
+        | None ->
+            System.Console.Error.WriteLine(
+                sprintf "[CRefTrace] caller=%s refStamp=%d name=%s -> MVAR-MISS (notContains=%b, envCount=%d) -> ChooseTyparSolution"
+                    caller tp.Stamp tp.DisplayName (not (tyenv.ContainsKey tp)) tyenv.Count)
+        | Some idx ->
+            System.Console.Error.WriteLine(
+                sprintf "[CRefTrace] caller=%s refStamp=%d name=%s -> VAR-INDEX=%u (envCount=%d)"
+                    caller tp.Stamp tp.DisplayName idx tyenv.Count)
+
+/// Log a typar being created/cloned (a NEW stamp that will appear in a
+/// method's constraint blob). This is where stamp 25459 (the clone) or its
+/// original must surface even when it is never itself the GGP subject.
+let private traceTyparCreate (tp: Typar) (cloneSite: string) (origStamp: int option) (realsig: bool) =
+    if typarTraceEnabled then
+        let refs = String.concat ", " ((collectConstraintTypars tp |> Map.toList |> List.map (fun (_, t) -> string t.Stamp) |> List.rev))
+        let orig = origStamp |> Option.map (sprintf "!%d") |> Option.defaultValue "-"
+        System.Console.Error.WriteLine(
+            sprintf "[CreateTrace] cloneSite=%s newStamp=%d name=%s rigidity=%A compgen=%b orig=%s realsig=%b constraintRefs=[ %s ]"
+                cloneSite tp.Stamp tp.DisplayName tp.Rigidity tp.IsCompilerGenerated orig realsig refs)
 #endif
 
 let rec GenTypeArgAux cenv m tyenv tyarg =
@@ -869,6 +898,21 @@ and GenTypeAux cenv m (tyenv: TypeReprEnv) voidOK ptrsOK ty =
             GenTypeAux cenv m tyenv voidOK ptrsOK defaultTy
 
     | TType_measure _ -> g.ilg.typ_Int32
+
+and GenTypeAuxTraced cenv m (tyenv: TypeReprEnv) voidOK ptrsOK caller ty =
+    #if DEBUG
+    ignore (match ty with
+            | TType_var(ctp, _) ->
+                System.Console.Error.WriteLine(
+                    sprintf "[CRefTrace] caller=%s refStamp=%d name=%s -> %s"
+                        caller ctp.Stamp ctp.Name
+                        (if tyenv.ContainsKey ctp then sprintf "VAR-INDEX=%u (envCount=%d)" (tyenv.Item(ctp, ctp.Range)) tyenv.Count
+                         else sprintf "MVAR-MISS (notContains=%b, envCount=%d)" (not (tyenv.ContainsKey ctp)) tyenv.Count))
+            | _ -> ())
+    #else
+    ignore caller
+    #endif
+    GenTypeAux cenv m tyenv voidOK ptrsOK ty
 
 //--------------------------------------------------------------------------
 // Generate ILX references to closures, classunions etc. given a tyenv
@@ -6343,17 +6387,38 @@ and GenDefaultValue cenv cgbuf eenv (ty, m) =
 // Generate generic parameters
 //----------------------------------------------------------------------------
 
+#if DEBUG
+/// Trace the subject typar of a GenGenericParam, then, per CoercesTo
+/// constraint-ref, the RESOLUTION decision (VAR-index vs MVAR-miss). This is
+/// the direct evidence for the class-vs-method constraint reference.
+and traceGenGenericParam (cenv: cenv) (eenv: IlxGenEnv) (tp: Typar) : unit =
+    match typarTraceEnabled with
+    | false -> ()
+    | true ->
+        System.Console.Error.WriteLine(
+            sprintf "[GGPTrace] subjectStamp=%d name=%s envCount=%d envRealsig=%b gRealsig=%b"
+                tp.Stamp tp.Name eenv.tyenv.Count eenv.realsig cenv.g.realsig)
+        let rec collectTyparRefs (t: TType) (acc: Typar list) : Typar list =
+            match t with
+            | TType_var(p, _) -> if p.Stamp <> tp.Stamp then p :: acc else acc
+            | TType_app(_tcr, args, _m) -> List.fold (fun a t' -> collectTyparRefs t' a) acc args
+            | _ -> acc
+        tp.Constraints
+        |> List.iter (function
+            | TyparConstraint.CoercesTo(ty, _) ->
+                collectTyparRefs ty []
+                |> List.iter (fun (p: Typar) -> traceConstraintRefResolution eenv.tyenv p (sprintf "GGP:%d" tp.Stamp))
+            | _ -> ())
+#endif
+
 and GenGenericParam cenv eenv (tp: Typar) =
     let g = cenv.g
  
     #if DEBUG
     if typarTraceEnabled then
-        System.Console.Error.WriteLine(
-            sprintf "[TyparTrace] emit=GenGenericParam eenv.tyenv.Count=%d  eenv.realsig=%b  g.realsig=%b"
-                eenv.tyenv.Count
-                eenv.realsig
-                cenv.g.realsig)
+        traceTyparCreate tp "GenGenericParam" None cenv.g.realsig
         emitTyparTraceLine tp "GenGenericParam"
+        traceGenGenericParam cenv eenv tp
     #endif
 
     let subTypeConstraints =
@@ -6361,7 +6426,7 @@ and GenGenericParam cenv eenv (tp: Typar) =
         |> List.choose (function
             | TyparConstraint.CoercesTo(ty, _) -> Some ty
             | _ -> None)
-        |> List.map (GenTypeAux cenv tp.Range eenv.tyenv VoidNotOK PtrTypesNotOK)
+        |> List.map (GenTypeAuxTraced cenv tp.Range eenv.tyenv VoidNotOK PtrTypesNotOK (sprintf "GGP:%d" tp.Stamp))
 
     let refTypeConstraint =
         tp |> HasConstraint(fun tc -> tc.IsIsReferenceType || tc.IsSupportsNull) // `null` implies not struct
@@ -10583,10 +10648,10 @@ and GenMethodForBinding
         | [] -> None
 
     let ilParams =
-        GenParams cenv eenvUnderMethTypeTypars m mspec witnessInfos paramInfos argTys (Some nonUnitNonSelfMethodVars) slotSigParamFlags
+        GenParams cenv homingEnv m mspec witnessInfos paramInfos argTys (Some nonUnitNonSelfMethodVars) slotSigParamFlags
 
     let ilReturn =
-        GenReturnInfo cenv eenvUnderMethTypeTypars (Some returnTy) mspec.FormalReturnType retInfo
+        GenReturnInfo cenv homingEnv (Some returnTy) mspec.FormalReturnType retInfo
 
     let methName = mspec.Name
     let tref = mspec.MethodRef.DeclaringTypeRef
