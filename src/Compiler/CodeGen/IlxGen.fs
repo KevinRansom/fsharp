@@ -556,6 +556,14 @@ type TypeReprEnv
     /// Check if a type parameter is in the environment
     member _.ContainsKey(tp: Typar) = reprs.ContainsKey(tp.Stamp)
 
+    /// Lookup a type parameter by Name+Range (survives cloning). Used in realsig+ to resolve
+    /// body typar clones to the host class's canonical typars when stamp lookup fails.
+    /// Returns the IL type variable index if a match is found.
+    member _.TryFindIndexNameRange(tp: Typar) : uint16 option =
+        reprs
+        |> Map.toList
+        |> List.tryPick (fun (_, (idx, t)) -> if tp.Name = t.Name && tp.Range = t.Range then Some idx else None)
+
     /// Add an additional type parameter to the environment. If the parameter is a units-of-measure parameter
     /// then it is ignored, since it doesn't correspond to a .NET type parameter.
     member tyenv.AddOne(tp: Typar) =
@@ -778,6 +786,14 @@ and GenTypeAux cenv m (tyenv: TypeReprEnv) voidOK ptrsOK ty =
 
         if tyenv.ContainsKey tp then
             mkILTyvarTy tyenv[tp, m]
+        elif g.realsig then
+            // realsig+: body typars may be clones of the host class typars (different stamp, same Name+Range).
+            // Resolve by Name+Range to the class's canonical typar so it emits as !0/!1 rather than a concrete default.
+            match tyenv.TryFindIndexNameRange tp with
+            | Some idx -> mkILTyvarTy idx
+            | None ->
+                let defaultTy = TypeRelations.ChooseTyparSolution g cenv.amap tp
+                GenTypeAux cenv m tyenv voidOK ptrsOK defaultTy
         else
             // Unsolved type variable not in the TypeReprEnv — can arise for inline SRTP
             // functions where constraint resolution leaves phantom typars unsolved.
@@ -1731,6 +1747,24 @@ let ComputeStorageForFSharpFunctionOrFSharpExtensionMember (cenv: cenv) cloc val
 
     let tps, witnessInfos, curriedArgInfos, returnTy, retInfo =
         GetValReprTypeInCompiledForm g valReprInfo numEnclosingTypars vref.Type m
+
+#if DEBUG
+    if g.realsig then
+        let allTyvars = (freeInType CollectTyparsNoCaching vref.Type).FreeTypars
+        let declaredTyvars = Zset.ofList typarOrder tps
+        let hostTyvars = Zset.diff allTyvars declaredTyvars
+        let hostList = Zset.elements hostTyvars
+        let hostNamesRng = hostList |> List.map (fun (tp: Typar) -> (tp.Name, tp.Range))
+        let hostStamps = hostList |> List.map (fun (tp: Typar) -> tp.Stamp)
+        eprintfn "[FNPATH v=%s ntps=%d tps=%A hostTyvars=%A hostStamps=%A allTyvars=%A] numEnclosing=%d"
+            vref.LogicalName
+            tps.Length
+            (tps |> List.map (fun (tp: Typar) -> (tp.Name, tp.Range)))
+            hostNamesRng
+            hostStamps
+            (allTyvars |> Zset.elements |> List.map (fun (tp: Typar) -> (tp.Name, tp.Range)))
+            numEnclosingTypars
+#endif
 
     // [realsig+] For a re-hosted nested method (a closure re-hosted as a method of its host class),
     // the method's parameter/return types reference the host class's generic parameters ambiently.
@@ -10342,6 +10376,23 @@ and GenMethodForBinding
     ) =
     let g = cenv.g
     let m = v.Range
+
+#if DEBUG
+    let hasRealsigBody = g.realsig && (ctps |> List.length) > 0
+    if hasRealsigBody then
+        let ctpsNamesRng = ctps |> List.map (fun (tp: Typar) -> (tp.Name, tp.Range))
+        let ctpsStamps = ctps |> List.map (fun (tp: Typar) -> tp.Stamp)
+        let bodyTyvars : Zset<Typar> = (freeInExpr CollectTyparsNoCaching methLambdaBody).FreeTyvars.FreeTypars
+        let bodyExtra = bodyTyvars |> Zset.filter (fun (tp: Typar) -> not (List.exists (fun (o: Typar) -> tp.Name = o.Name && tp.Range = o.Range) ctps))
+        eprintfn "[BSIG v=%s nctps=%d ctps=%A ctpsStamps=%A bodyExtra=%A bodyExtraStamps=%A] methLambdaTyparsStamps=%A"
+            v.LogicalName
+            ctps.Length
+            ctpsNamesRng
+            ctpsStamps
+            (bodyExtra |> Zset.elements |> List.map (fun (tp: Typar) -> (tp.Name, tp.Range)))
+            (bodyExtra |> Zset.elements |> List.map (fun (tp: Typar) -> tp.Stamp))
+            (methLambdaTypars |> List.map (fun (tp: Typar) -> tp.Stamp))
+#endif
 
     // Closures synthesized inside a member body (inner `let rec`, `task`/`async` state
     // machines, quotation-splice helpers) nest in the IL type identified by eenv.cloc.
