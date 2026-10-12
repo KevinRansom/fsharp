@@ -794,8 +794,13 @@ let FlatEnvPacks g fclassM topValS declist (reqdItemsMap: Zmap<BindingGroupShari
        let aenvFor     v = Zmap.force v cmap ("aenvFor", nameOfVal)
        let aenvExprFor v = exprForVal env.m (aenvFor v)
 
-       // build PackedReqdItems
-       let reqdTypars = env.reqdTypars
+        // build PackedReqdItems
+       let reqdTypars =
+           if g.realsig then
+               let ownerTypars = g.RealsigOwnerTypars()
+               env.reqdTypars |> Zset.filter (fun (tp: Typar) -> not (List.exists (fun (o: Typar) -> tp.Name = o.Name && tp.Range = o.Range) ownerTypars))
+           else
+               env.reqdTypars
        let aenvs = Zmap.values cmap
        let pack = cmapPairs |> List.map (fun (v, aenv) -> mkInvisibleBind aenv (exprForVal env.m v))
        let unpack =
@@ -877,6 +882,7 @@ let CreateNewValuesForTLR (scope: PerFileNamingScope) g tlrS arityM fclassM envP
             scope.Fresh(name, m)
 
         let fHat = mkLocalNameTypeArity f.IsCompilerGenerated m fHatName fHatTy (Some fHatArity)
+
         fHat
 
     let fs =
