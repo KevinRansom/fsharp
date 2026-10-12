@@ -38,7 +38,7 @@ open FSharp.Compiler.TypeProviders
 module internal TypeRemapping =
 
     // [TRACE PROVENANCE] begin — remove this whole block, and the [TRACE PROVENANCE] lines in the two bodies, after diagnosis
-    #if DEBUG
+#if DEBUG
     module TraceProvenance =
         /// Collects the stamps of typars referenced by a type (only for trace logging).
         let rec gatherTypes (ty: TType) (acc: string list) =
@@ -50,6 +50,7 @@ module internal TypeRemapping =
             | TType_fun(d, r, _) -> gatherTypes r (gatherTypes d acc)
             | TType_forall(_, r) -> gatherTypes r acc
             | _ -> acc
+
         /// Renders constraints to the stamps of typars they reference (only for trace logging).
         let constraintRefs (cs: TyparConstraint list) : string =
             cs
@@ -61,7 +62,7 @@ module internal TypeRemapping =
                 | TyparConstraint.SimpleChoice(tys, _) -> tys |> List.collect (fun t -> gatherTypes t [] |> List.rev)
                 | _ -> [])
             |> String.concat " "
-    #endif
+#endif
     // [TRACE PROVENANCE] end
 
     let inline compareBy (x: 'T | null) (y: 'T | null) ([<InlineIfLambda>] func: 'T -> 'K) =
@@ -418,9 +419,10 @@ module internal TypeRemapping =
             ||> List.iter2 (fun tporig tp ->
                 let csAfter = remapTyparConstraintsAux tyenv tporig.Constraints
                 // [TRACE PROVENANCE] begin
-                #if DEBUG
+#if DEBUG
                 let csBeforeStr = TraceProvenance.constraintRefs tporig.Constraints
                 let csAfterStr = TraceProvenance.constraintRefs csAfter
+
                 System.Console.Error.WriteLine(
                     sprintf
                         "[TRACE PROVENANCE] copyAndRemapAndBindTyparsFull scope=\"class-env -> method-env remap\" origStamp=%d origName=%s newStamp=%d newName=%s remapTyparApplied=%b constraintStampsBefore=[ %s ] constraintStampsAfter=[ %s ]"
@@ -430,8 +432,9 @@ module internal TypeRemapping =
                         tp.Name
                         (csBeforeStr <> csAfterStr)
                         csBeforeStr
-                        csAfterStr)
-                #endif
+                        csAfterStr
+                )
+#endif
                 // [TRACE PROVENANCE] end
                 tp.SetConstraints csAfter
                 tp.SetAttribs(tporig.Attribs |> remapAttrib))

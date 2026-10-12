@@ -740,19 +740,40 @@ and GenTypeAux cenv m (tyenv: TypeReprEnv) voidOK ptrsOK ty =
 
 #if DEBUG
         if System.Environment.GetEnvironmentVariable("FSharp_CopyTyparTrace") = "1" then
-            let cs = tp.typar_opt_data |> Option.map (fun tg -> tg.typar_constraints) |> Option.defaultValue []
-            let hasCo = cs |> List.exists (function TyparConstraint.CoercesTo _ -> true | _ -> false)
+            let cs =
+                tp.typar_opt_data
+                |> Option.map (fun tg -> tg.typar_constraints)
+                |> Option.defaultValue []
+
+            let hasCo =
+                cs
+                |> List.exists (function
+                    | TyparConstraint.CoercesTo _ -> true
+                    | _ -> false)
+
             if hasCo then
-                let mutable stamps : string list = []
+                let mutable stamps: string list = []
+
                 let rec gather ty =
                     match ty with
                     | TType_var(tp, _) -> stamps <- (string tp.Stamp) :: stamps
                     | TType_app(_, args, _) -> args |> List.iter gather
                     | _ -> ()
-                cs |> List.iter (function
+
+                cs
+                |> List.iter (function
                     | TyparConstraint.CoercesTo(ty, _) -> gather ty
                     | _ -> ())
-                System.Console.Error.WriteLine(sprintf "GenTypeAux stamp=%d name=%s -> constraintRefs=[ %s ] range=[ %s ] env.contains [ %s ]]" tp.typar_stamp tp.Name (String.concat ", " (List.rev stamps)) (tp.Range.ToString()) ((tyenv.ContainsKey tp).ToString()))
+
+                System.Console.Error.WriteLine(
+                    sprintf
+                        "GenTypeAux stamp=%d name=%s -> constraintRefs=[ %s ] range=[ %s ] env.contains [ %s ]]"
+                        tp.typar_stamp
+                        tp.Name
+                        (String.concat ", " (List.rev stamps))
+                        (tp.Range.ToString())
+                        ((tyenv.ContainsKey tp).ToString())
+                )
 #endif
 
         if tyenv.ContainsKey tp then
@@ -1711,7 +1732,31 @@ let ComputeStorageForFSharpFunctionOrFSharpExtensionMember (cenv: cenv) cloc val
     let tps, witnessInfos, curriedArgInfos, returnTy, retInfo =
         GetValReprTypeInCompiledForm g valReprInfo numEnclosingTypars vref.Type m
 
-    let tyenvUnderTypars = TypeReprEnv.Empty.ForTypars tps
+    // [realsig+] For a re-hosted nested method (a closure re-hosted as a method of its host class),
+    // the method's parameter/return types reference the host class's generic parameters ambiently.
+    // They are NOT part of the method's own generic-parameter list (tps), so we add them to the
+    // tyenv (so they resolve to the class's IL type variables) but NOT to ilMethodInst (so the
+    // method does not re-declare them).
+    //
+    // We extract the host typars from vref.Type (the source of the param types) by computing all
+    // free typars in vref.Type and subtracting tps (the method's declared typars). This ensures the
+    // typars we add to tyenv are the SAME objects as those in the param types (avoiding stamp
+    // mismatches with typars stored earlier in TLR).
+    let tyenvUnderTypars =
+        if g.realsig then
+            let allTyvars = (freeInType CollectTyparsNoCaching vref.Type).FreeTypars
+            let declaredTyvars = Zset.ofList typarOrder tps
+            let hostTyvars = Zset.diff allTyvars declaredTyvars
+
+            if Zset.isEmpty hostTyvars then
+                TypeReprEnv.Empty.ForTypars tps
+            else
+                let hostList = Zset.elements hostTyvars
+                let tyenvWithHost = TypeReprEnv.Empty.Add hostList
+                tyenvWithHost.Add tps
+        else
+            TypeReprEnv.Empty.ForTypars tps
+
     let methodArgTys, paramInfos = curriedArgInfos |> List.concat |> List.unzip
     let ilMethodArgTys = GenParamTypes cenv m tyenvUnderTypars false methodArgTys
     let ilRetTy = GenReturnType cenv m tyenvUnderTypars returnTy
@@ -6236,10 +6281,11 @@ and GenDefaultValue cenv cgbuf eenv (ty, m) =
 and GenGenericParam cenv eenv (tp: Typar) =
     let g = cenv.g
 
-    #if DEBUG
+#if DEBUG
     // [TRACE PROVENANCE] dump the typar and every typar it (and its trait solution) references at IL emission time
     begin
-        let mutable stamps : string list = []
+        let mutable stamps: string list = []
+
         let rec gather (ty: TType) =
             match ty with
             | TType_var(p, _) -> stamps <- (string p.Stamp) :: stamps
@@ -6249,41 +6295,85 @@ and GenGenericParam cenv eenv (tp: Typar) =
                 |> ListMeasureVarOccsWithNonZeroExponents
                 |> List.iter (fun (p, _) -> stamps <- (string p.Stamp) :: stamps)
             | _ -> ()
+
         let slnTy (sl: TraitConstraintSln) =
             match sl with
-            | ILMethSln(ty, _, _, minst, stOpt) -> gather ty; minst |> List.iter gather; Option.iter gather stOpt
-            | FSMethSln(ty, _, minst, stOpt) -> gather ty; minst |> List.iter gather; Option.iter gather stOpt
+            | ILMethSln(ty, _, _, minst, stOpt) ->
+                gather ty
+                minst |> List.iter gather
+                Option.iter gather stOpt
+            | FSMethSln(ty, _, minst, stOpt) ->
+                gather ty
+                minst |> List.iter gather
+                Option.iter gather stOpt
             | FSRecdFieldSln(tinst, _, _) -> tinst |> List.iter gather
             | FSAnonRecdFieldSln(_, tinst, _) -> tinst |> List.iter gather
             | _ -> ()
-        let cs = tp.typar_opt_data |> Option.map (fun tg -> tg.typar_constraints) |> Option.defaultValue []
-        cs |> List.iter (function
+
+        let cs =
+            tp.typar_opt_data
+            |> Option.map (fun tg -> tg.typar_constraints)
+            |> Option.defaultValue []
+
+        cs
+        |> List.iter (function
             | TyparConstraint.CoercesTo(ty, _) -> gather ty
             | TyparConstraint.SimpleChoice(tys, _) -> tys |> List.iter gather
             | TyparConstraint.MayResolveMember(tr, _) ->
                 (let (TTrait(_, _, _, _, _, _, solution, _)) = tr
-                 match solution.Value with Some sl -> slnTy sl | None -> ())
-            | _ -> ())
-        System.Console.Error.WriteLine(sprintf "[TRACE PROVENANCE] GenGenericParam stamp=%d name=%s -> refs=[ %s ] range=[ %s ]" tp.Stamp tp.Name (String.concat ", " (List.rev stamps)) (tp.Range.ToString()))
-    end
-    #endif
 
-    #if DEBUG
+                 match solution.Value with
+                 | Some sl -> slnTy sl
+                 | None -> ())
+            | _ -> ())
+
+        System.Console.Error.WriteLine(
+            sprintf
+                "[TRACE PROVENANCE] GenGenericParam stamp=%d name=%s -> refs=[ %s ] range=[ %s ]"
+                tp.Stamp
+                tp.Name
+                (String.concat ", " (List.rev stamps))
+                (tp.Range.ToString())
+        )
+    end
+#endif
+
+#if DEBUG
     if System.Environment.GetEnvironmentVariable("FSharp_CopyTyparTrace") = "1" then
-        let cs = tp.typar_opt_data |> Option.map (fun tg -> tg.typar_constraints) |> Option.defaultValue []
-        let hasCo = cs |> List.exists (function TyparConstraint.CoercesTo _ -> true | _ -> false)
+        let cs =
+            tp.typar_opt_data
+            |> Option.map (fun tg -> tg.typar_constraints)
+            |> Option.defaultValue []
+
+        let hasCo =
+            cs
+            |> List.exists (function
+                | TyparConstraint.CoercesTo _ -> true
+                | _ -> false)
+
         if hasCo then
-            let mutable stamps : string list = []
+            let mutable stamps: string list = []
+
             let rec gather ty =
                 match ty with
                 | TType_var(tp, _) -> stamps <- (string tp.Stamp) :: stamps
                 | TType_app(_, args, _) -> args |> List.iter gather
                 | _ -> ()
-            cs |> List.iter (function
+
+            cs
+            |> List.iter (function
                 | TyparConstraint.CoercesTo(ty, _) -> gather ty
                 | _ -> ())
-            System.Console.Error.WriteLine(sprintf "GenGenericParam stamp=%d name=%s -> constraintRefs=[ %s ] range=[ %s ]" tp.typar_stamp tp.Name (String.concat ", " (List.rev stamps)) (tp.Range.ToString()))
-    #endif
+
+            System.Console.Error.WriteLine(
+                sprintf
+                    "GenGenericParam stamp=%d name=%s -> constraintRefs=[ %s ] range=[ %s ]"
+                    tp.typar_stamp
+                    tp.Name
+                    (String.concat ", " (List.rev stamps))
+                    (tp.Range.ToString())
+            )
+#endif
 
     let subTypeConstraints =
         tp.Constraints
@@ -11129,13 +11219,14 @@ and AllocValReprWithinExpr cenv cgbuf endMark cloc v eenv =
                     CompLocForTopLevelFunctions eenv.moduleCloc
                 else
                     CompLocForInitClass eenv.moduleCloc
-            else
+            else if
                 // With realsig=true these vals are hosted on the type that originated the closure
                 // With realsig=false these vals are hosted on the module enclosing the type that originated the closure
-                if cenv.g.realsig then
-                    cloc
-                else
-                    eenv.moduleCloc
+                cenv.g.realsig
+            then
+                cloc
+            else
+                eenv.moduleCloc
         else
             cloc
 

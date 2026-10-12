@@ -918,15 +918,17 @@ module internal MemberRepresentation =
 
     module PrettyTypes =
         // [TRACE PROVENANCE] begin — remove this guard block after diagnosis
-        #if DEBUG
+#if DEBUG
         /// Collects the stamps of typars referenced by a type (used only for trace logging).
         let traceGatherTyparStamps ty =
-            let mutable stamps : string list = []
+            let mutable stamps: string list = []
+
             let rec g t =
                 match t with
                 | TType_var(p, _) -> stamps <- (string p.Stamp) :: stamps
                 | TType_app(_, a, _) -> a |> List.iter g
                 | _ -> ()
+
             g ty
             stamps
 
@@ -942,7 +944,7 @@ module internal MemberRepresentation =
                 | _ -> [])
             |> List.rev
             |> String.concat ", "
-        #endif
+#endif
         // [TRACE PROVENANCE] end
 
         let newPrettyTypar (tp: Typar) nm =
@@ -963,7 +965,7 @@ module internal MemberRepresentation =
             let renaming = renaming @ tl
 
             // [TRACE PROVENANCE] beginning — remove both #if ... #endif guard blocks after diagnosis
-            #if DEBUG
+#if DEBUG
             (tps, niceTypars)
             ||> List.iter2 (fun tp tpnice ->
                 let csBefore = tp.Constraints
@@ -980,8 +982,9 @@ module internal MemberRepresentation =
                         tpnice.Name
                         csBeforeStr
                         csAfterStr
-                        (csAfterStr.Contains (string tp.Stamp))))
-            #endif
+                        (csAfterStr.Contains(string tp.Stamp))
+                ))
+#endif
             // [TRACE PROVENANCE] end
 
             (tps, niceTypars)
