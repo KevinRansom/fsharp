@@ -562,7 +562,11 @@ type TypeReprEnv
     member _.TryFindIndexNameRange(tp: Typar) : uint16 option =
         reprs
         |> Map.toList
-        |> List.tryPick (fun (_, (idx, t)) -> if tp.Name = t.Name && tp.Range = t.Range then Some idx else None)
+        |> List.tryPick (fun (_, (idx, t)) ->
+            if tp.Name = t.Name && tp.Range = t.Range then
+                Some idx
+            else
+                None)
 
     /// Add an additional type parameter to the environment. If the parameter is a units-of-measure parameter
     /// then it is ignored, since it doesn't correspond to a .NET type parameter.
@@ -1756,7 +1760,9 @@ let ComputeStorageForFSharpFunctionOrFSharpExtensionMember (cenv: cenv) cloc val
         let hostList = Zset.elements hostTyvars
         let hostNamesRng = hostList |> List.map (fun (tp: Typar) -> (tp.Name, tp.Range))
         let hostStamps = hostList |> List.map (fun (tp: Typar) -> tp.Stamp)
-        eprintfn "[FNPATH v=%s ntps=%d tps=%A hostTyvars=%A hostStamps=%A allTyvars=%A] numEnclosing=%d"
+
+        eprintfn
+            "[FNPATH v=%s ntps=%d tps=%A hostTyvars=%A hostStamps=%A allTyvars=%A] numEnclosing=%d"
             vref.LogicalName
             tps.Length
             (tps |> List.map (fun (tp: Typar) -> (tp.Name, tp.Range)))
@@ -4840,8 +4846,16 @@ and GenApp (cenv: cenv) cgbuf eenv (f, fty, tyargs, curriedArgs, m) sequel =
             // numEnclILTypeArgs will include unit-of-measure args, unfortunately. For now, just cut-and-paste code from GetMemberCallInfo
             // @REVIEW: refactor this
             let numEnclILTypeArgs =
+                // [realsig+] A closure re-hosted as a nested static method of its host class
+                // inherits the class' type params (no own generic params). The call site must
+                // instantiate the declaring class with the host class' typar count, so the
+                // method's references to !0/!1 bind to the class' type args.
                 match vref.MemberInfo with
                 | Some _ when not vref.IsExtensionMember -> List.length (vref.MemberApparentEntity.Typars |> DropErasedTypars)
+                | _ when cenv.g.realsig ->
+                    (match cenv.g.RealsigClosureParentTryGet(vref.Deref) with
+                     | Some info -> List.length info.ownerTypars
+                     | None -> 0)
                 | _ -> 0
 
             let ilEnclArgTys, ilMethArgTys =
@@ -10379,12 +10393,20 @@ and GenMethodForBinding
 
 #if DEBUG
     let hasRealsigBody = g.realsig && (ctps |> List.length) > 0
+
     if hasRealsigBody then
         let ctpsNamesRng = ctps |> List.map (fun (tp: Typar) -> (tp.Name, tp.Range))
         let ctpsStamps = ctps |> List.map (fun (tp: Typar) -> tp.Stamp)
-        let bodyTyvars : Zset<Typar> = (freeInExpr CollectTyparsNoCaching methLambdaBody).FreeTyvars.FreeTypars
-        let bodyExtra = bodyTyvars |> Zset.filter (fun (tp: Typar) -> not (List.exists (fun (o: Typar) -> tp.Name = o.Name && tp.Range = o.Range) ctps))
-        eprintfn "[BSIG v=%s nctps=%d ctps=%A ctpsStamps=%A bodyExtra=%A bodyExtraStamps=%A] methLambdaTyparsStamps=%A"
+
+        let bodyTyvars: Zset<Typar> =
+            (freeInExpr CollectTyparsNoCaching methLambdaBody).FreeTyvars.FreeTypars
+
+        let bodyExtra =
+            bodyTyvars
+            |> Zset.filter (fun (tp: Typar) -> not (List.exists (fun (o: Typar) -> tp.Name = o.Name && tp.Range = o.Range) ctps))
+
+        eprintfn
+            "[BSIG v=%s nctps=%d ctps=%A ctpsStamps=%A bodyExtra=%A bodyExtraStamps=%A] methLambdaTyparsStamps=%A"
             v.LogicalName
             ctps.Length
             ctpsNamesRng
@@ -10449,7 +10471,28 @@ and GenMethodForBinding
 
     // The type parameters of the method's type are different to the type parameters
     // for the big lambda ("tlambda") of the implementation of the method.
-    let eenvUnderMethLambdaTypars = EnvForTypars methLambdaTypars eenv
+    // [realsig+] For a closure re-hosted as a nested static method of its host class,
+    // the body's tyenv must include the host class's canonical typars (from eenv.tyenv,
+    // set by EnvForTycon in GenTypeDef) at IL indices 0..k-1, and the method's own
+    // typars at k..n-1. The default EnvForTypars resets to only the method's own typars,
+    // so the body's references to the class typars fall back to ChooseTyparSolution
+    // (concrete types) instead of the class's !0/!1.
+    let eenvUnderMethLambdaTypars =
+        if cenv.g.realsig && not (Option.isSome v.MemberInfo) && not v.IsExtensionMember then
+            let hostTyvars =
+                eenv.tyenv.AsUserProvidedTypars()
+                |> Zset.elements
+                |> List.filter (fun (tp: Typar) -> not (List.exists (fun (o: Typar) -> o.Stamp = tp.Stamp) methLambdaTypars))
+
+            if List.isEmpty hostTyvars then
+                EnvForTypars methLambdaTypars eenv
+            else
+                { eenv with
+                    tyenv = (eenv.tyenv.ResetTypars().Add hostTyvars).Add methLambdaTypars
+                }
+        else
+            EnvForTypars methLambdaTypars eenv
+
     let eenvUnderMethTypeClassTypars = EnvForTypars ctps eenv
     let eenvUnderMethTypeTypars = AddTyparsToEnv mtps eenvUnderMethTypeClassTypars
 
