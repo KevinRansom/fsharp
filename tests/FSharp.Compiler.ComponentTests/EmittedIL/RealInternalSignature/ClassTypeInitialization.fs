@@ -588,9 +588,9 @@ printfn "%A" (MyClass.result())
                     "call       bool Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers::takeInner@301<!!0,!!1>"
                     "call       bool Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers::takeOuter@308<!!0,!!1>"
                     "call       void Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers::iter@272"
-                    "call       bool Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U>::takeInner@301"
-                    "call       bool Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U>::takeOuter@308"
-                    "call       void Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U>::iter@272"
+                    "call       bool class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U>::takeInner@301(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!0,!1>,"
+                    "call       bool class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U>::takeOuter@308(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!0,!1>,"
+                    "call       void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U>::iter@272(class [FSharp.Core]Microsoft.FSharp.Collections.FSharpList`1<class [FSharp.Core]Microsoft.FSharp.Core.FSharpFunc`2<class [FSharp.Core]Microsoft.FSharp.Core.Unit,class [FSharp.Core]Microsoft.FSharp.Core.Unit>>)"
                 ]
             | false, true ->
                 [
@@ -605,9 +605,9 @@ printfn "%A" (MyClass.result())
                     "instance void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2/takeInner@303<!T,!U>::.ctor"
                     "instance void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2/takeOuter@309<!T,!U>::.ctor"
                     "instance void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2/iter@273<!T,!U>::.ctor"
-                    "call       bool Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U>::takeInner@301"
-                    "call       bool Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U>::takeOuter@308"
-                    "call       void Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U>::iter@272"
+                    "call       bool class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U>::takeInner@301(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!0,!1>,"
+                    "call       bool class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U>::takeOuter@308(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!0,!1>,"
+                    "call       void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U>::iter@272(class [FSharp.Core]Microsoft.FSharp.Collections.FSharpList`1<class [FSharp.Core]Microsoft.FSharp.Core.FSharpFunc`2<class [FSharp.Core]Microsoft.FSharp.Core.Unit,class [FSharp.Core]Microsoft.FSharp.Core.Unit>>)"
                 ]
             | true, false ->
                 [
@@ -622,15 +622,15 @@ printfn "%A" (MyClass.result())
                     "call       bool Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers::takeInner@301<!!0,!!1>"
                     "call       bool Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers::takeOuter@308<!!0,!!1>"
                     "call       void Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers::iter@272"
-                    "call       bool Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U>::takeInner@301"
-                    "call       bool Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U>::takeOuter@308"
-                    "call       void Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U>::iter@272"
+                    "call       bool class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U>::takeInner@301(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!0,!1>,"
+                    "call       bool class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U>::takeOuter@308(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!0,!1>,"
+                    "call       void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U>::iter@272(class [FSharp.Core]Microsoft.FSharp.Collections.FSharpList`1<class [FSharp.Core]Microsoft.FSharp.Core.FSharpFunc`2<class [FSharp.Core]Microsoft.FSharp.Core.Unit,class [FSharp.Core]Microsoft.FSharp.Core.Unit>>)"
                 ]
             | true, true ->
                 [
-                    "call       bool Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U>::takeInner@301"
-                    "call       bool Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U>::takeOuter@308"
-                    "call       void Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U>::iter@272"
+                    "call       bool class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U>::takeInner@301(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!0,!1>,"
+                    "call       bool class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U>::takeOuter@308(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!0,!1>,"
+                    "call       void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U>::iter@272(class [FSharp.Core]Microsoft.FSharp.Collections.FSharpList`1<class [FSharp.Core]Microsoft.FSharp.Core.FSharpFunc`2<class [FSharp.Core]Microsoft.FSharp.Core.Unit,class [FSharp.Core]Microsoft.FSharp.Core.Unit>>)"
                 ],
                 [
                     "instance void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/takeInner@303<!T,!U>::.ctor"
