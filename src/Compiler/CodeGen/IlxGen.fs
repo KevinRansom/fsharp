@@ -72,6 +72,20 @@ let AddNonUserCompilerGeneratedAttribs (g: TcGlobals) (mdef: ILMethodDef) = g.Ad
 
 let debugDisplayMethodName = "__DebugDisplay"
 
+#if DEBUG
+let realsigLog (msg: string) =
+    try
+        eprintfn "%s" msg
+        System.Diagnostics.Trace.Flush()
+    with _ -> ()
+
+let ilTypeNames (tys: ILType list) =
+    (tys |> List.map (fun t ->
+        try
+            t.BasicQualifiedName
+        with _ -> "?"))
+    |> String.concat ";"
+#endif
 let useHiddenInitCode = true
 
 let iLdcZero = AI_ldc(DT_I4, ILConst.I4 0)
@@ -4845,28 +4859,98 @@ and GenApp (cenv: cenv) cgbuf eenv (f, fty, tyargs, curriedArgs, m) sequel =
 
             // numEnclILTypeArgs will include unit-of-measure args, unfortunately. For now, just cut-and-paste code from GetMemberCallInfo
             // @REVIEW: refactor this
+            // For re-hosted closures (TLR fHat) the call-site Val has MemberInfo=None and
+            // is NOT the Val that CheckExpressions registered in g.RealsigClosureParents
+            // (keyed by the original closure-binding Val's stamp; TLR never re-registers the
+            // re-hosted method's Val). Recover the host/owner typars from the caller's
+            // ambient type-parameter environment (eenv.tyenv), which contains the host
+            // class's typars (e.g. 'T, 'U of ConcatEnumerator<'T,'U>) because the call
+            // site is inside a member of that class. This works uniformly for all
+            // re-hosted closures, including those (like iter@272) whose *type* contains
+            // no free occurrences of the host typars (the typars are captured only as
+            // substituted values in the closure body).
+            let realsigAmbientTypars =
+                match vref.MemberInfo with
+                | Some _ when not vref.IsExtensionMember -> []
+                | _ when cenv.g.realsig ->
+                    (match cenv.g.RealsigClosureParentTryGet(vref.Deref) with
+                        | Some info -> info.ownerTypars
+                        | None ->
+                            // Re-hosted TLR closures are compiled as top-level methods that are
+                            // not member/module bindings. Only those inherit the host class's
+                            // typars; ordinary module functions (e.g. MyCollections.IEnumerator.check)
+                            // must not, or a non-generic module gets spurious generic args.
+                            if
+                                (vref.IsCompiledAsTopLevel || vref.IsCompilerGenerated)
+                                && not (vref.IsMember || vref.IsMemberOrModuleBinding)
+                            then
+                                Zset.elements (eenv.tyenv.AsUserProvidedTypars())
+                            else
+                                [])
+
+                | _ -> []
+
             let numEnclILTypeArgs =
-                // [realsig+] A closure re-hosted as a nested static method of its host class
-                // inherits the class' type params (no own generic params). The call site must
-                // instantiate the declaring class with the host class' typar count, so the
-                // method's references to !0/!1 bind to the class' type args.
                 match vref.MemberInfo with
                 | Some _ when not vref.IsExtensionMember -> List.length (vref.MemberApparentEntity.Typars |> DropErasedTypars)
                 | _ when cenv.g.realsig ->
                     (match cenv.g.RealsigClosureParentTryGet(vref.Deref) with
-                     | Some info -> List.length info.ownerTypars
-                     | None -> 0)
+                        | Some info -> List.length info.ownerTypars
+                        | None -> List.length realsigAmbientTypars)
                 | _ -> 0
 
             let ilEnclArgTys, ilMethArgTys =
-                if ilTyArgs.Length < numEnclILTypeArgs then
-                    error (InternalError("length mismatch", m))
+                if List.length realsigAmbientTypars > 0 then
+                    // The closure's type does not mention the host typars (e.g. iter@272),
+                    // so they are not in ilTyArgs. Reconstruct the class-instantiating
+                    // args from the caller's ambient typars instead.
+                    (realsigAmbientTypars |> List.map (fun tp -> GenType cenv m eenv.tyenv (mkTyparTy tp)), ilTyArgs)
+                else
+                    (if ilTyArgs.Length < numEnclILTypeArgs then
+                         error (InternalError("length mismatch", m))
 
-                List.splitAt numEnclILTypeArgs ilTyArgs
+                     List.splitAt numEnclILTypeArgs ilTyArgs)
+
+#if DEBUG
+            let apparentTyconTypars =
+                if vref.MemberInfo.IsSome then
+                    List.length (vref.MemberApparentEntity.Typars |> DropErasedTypars)
+                else
+                    -1 // parentless: val_member_info is None; cannot call MemberApparentEntity (it aborts)
+
+            realsigLog
+                (sprintf
+                    "[REALSIG-CALLSITE v=%s realsig=%b numEnclILTypeArgs=%d parent=%s MemberInfo=%b IsExtMember=%b ApparentTyconTypars=%d] ilTyArgs=[%s] ilEnclArgTys=[%s] ilMethArgTys=[%s]"
+                    vref.LogicalName
+                    cenv.g.realsig
+                    numEnclILTypeArgs
+                    (match cenv.g.RealsigClosureParentTryGet(vref.Deref) with
+                        | Some info -> sprintf "Some(ownerTypars=%d)" (List.length info.ownerTypars)
+                        | None -> "None")
+                    vref.MemberInfo.IsSome
+                    vref.IsExtensionMember
+                    apparentTyconTypars
+                    (ilTyArgs |> ilTypeNames)
+                    (ilEnclArgTys |> ilTypeNames)
+                    (ilMethArgTys |> ilTypeNames))
+#endif
 
             let boxity = mspec.DeclaringType.Boxity
             let valu = boxity = AsValue
             let mspec = mkILMethSpec (mspec.MethodRef, boxity, ilEnclArgTys, ilMethArgTys)
+
+#if DEBUG
+            let dt = mspec.DeclaringType
+
+            realsigLog
+                (sprintf
+                    "[REALSIG-CALLSITE-MSPEC v=%s] ToString=%s DeclaringType.BasicQualifiedName=%s GenericArgs=[%s] MethodRef=%s"
+                    vref.LogicalName
+                    (mspec.ToString())
+                    (try dt.BasicQualifiedName with _ -> "?")
+                    (dt.GenericArgs |> ilTypeNames)
+                    (mspec.MethodRef.ToString()))
+#endif
 
             // "Unit" return types on static methods become "void"
             let mustGenerateUnitAfterCall = Option.isNone returnTy
@@ -6064,7 +6148,30 @@ and GenILCall
     let ilEnclArgTys = GenTypeArgs cenv m eenv.tyenv enclArgTys
     let ilMethArgTys = GenTypeArgs cenv m eenv.tyenv methArgTys
     let ilReturnTys = GenTypes cenv m eenv.tyenv returnTys
+
+#if DEBUG
+    realsigLog
+        (sprintf
+            "[REALSIG-ILCALL name=%s realsig=%b] enclArgTys=[%s] methArgTys=[%s]"
+            ilMethRef.Name
+            cenv.g.realsig
+            (ilEnclArgTys |> ilTypeNames)
+            (ilMethArgTys |> ilTypeNames))
+#endif
+
     let ilMethSpec = mkILMethSpec (ilMethRef, boxity, ilEnclArgTys, ilMethArgTys)
+
+#if DEBUG
+    let dt = ilMethSpec.DeclaringType
+
+    realsigLog
+        (sprintf
+            "[REALSIG-ILCALL-MSPEC name=%s] ToString=%s DeclaringType.BasicQualifiedName=%s GenericArgs=[%s]"
+            ilMethRef.Name
+            (ilMethSpec.ToString())
+            (try dt.BasicQualifiedName with _ -> "?")
+            (dt.GenericArgs |> ilTypeNames))
+#endif
 
     let useICallVirt =
         (virt || useCallVirt cenv boxity ilMethSpec isBaseCall)
