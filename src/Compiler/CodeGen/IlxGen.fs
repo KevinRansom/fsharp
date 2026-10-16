@@ -556,6 +556,18 @@ type TypeReprEnv
     /// Check if a type parameter is in the environment
     member _.ContainsKey(tp: Typar) = reprs.ContainsKey(tp.Stamp)
 
+    /// Lookup a type parameter by Name+Range (survives cloning). Used in realsig+ to resolve
+    /// body typar clones to the host class's canonical typars when stamp lookup fails.
+    /// Returns the IL type variable index if a match is found.
+    member _.TryFindIndexNameRange(tp: Typar) : uint16 option =
+        reprs
+        |> Map.toList
+        |> List.tryPick (fun (_, (idx, t)) ->
+            if tp.Name = t.Name && tp.Range = t.Range then
+                Some idx
+            else
+                None)
+
     /// Add an additional type parameter to the environment. If the parameter is a units-of-measure parameter
     /// then it is ignored, since it doesn't correspond to a .NET type parameter.
     member tyenv.AddOne(tp: Typar) =
@@ -737,8 +749,17 @@ and GenTypeAux cenv m (tyenv: TypeReprEnv) voidOK ptrsOK ty =
             EraseClosures.mkILTyFuncTy cenv.ilxPubCloEnv
 
     | TType_var(tp, _) ->
+
         if tyenv.ContainsKey tp then
             mkILTyvarTy tyenv[tp, m]
+        elif g.realsig then
+            // realsig+: body typars may be clones of the host class typars (different stamp, same Name+Range).
+            // Resolve by Name+Range to the class's canonical typar so it emits as !0/!1 rather than a concrete default.
+            match tyenv.TryFindIndexNameRange tp with
+            | Some idx -> mkILTyvarTy idx
+            | None ->
+                let defaultTy = TypeRelations.ChooseTyparSolution g cenv.amap tp
+                GenTypeAux cenv m tyenv voidOK ptrsOK defaultTy
         else
             // Unsolved type variable not in the TypeReprEnv — can arise for inline SRTP
             // functions where constraint resolution leaves phantom typars unsolved.
@@ -1693,7 +1714,31 @@ let ComputeStorageForFSharpFunctionOrFSharpExtensionMember (cenv: cenv) cloc val
     let tps, witnessInfos, curriedArgInfos, returnTy, retInfo =
         GetValReprTypeInCompiledForm g valReprInfo numEnclosingTypars vref.Type m
 
-    let tyenvUnderTypars = TypeReprEnv.Empty.ForTypars tps
+    // [realsig+] For a re-hosted nested method (a closure re-hosted as a method of its host class),
+    // the method's parameter/return types reference the host class's generic parameters ambiently.
+    // They are NOT part of the method's own generic-parameter list (tps), so we add them to the
+    // tyenv (so they resolve to the class's IL type variables) but NOT to ilMethodInst (so the
+    // method does not re-declare them).
+    //
+    // We extract the host typars from vref.Type (the source of the param types) by computing all
+    // free typars in vref.Type and subtracting tps (the method's declared typars). This ensures the
+    // typars we add to tyenv are the SAME objects as those in the param types (avoiding stamp
+    // mismatches with typars stored earlier in TLR).
+    let tyenvUnderTypars =
+        if g.realsig then
+            let allTyvars = (freeInType CollectTyparsNoCaching vref.Type).FreeTypars
+            let declaredTyvars = Zset.ofList typarOrder tps
+            let hostTyvars = Zset.diff allTyvars declaredTyvars
+
+            if Zset.isEmpty hostTyvars then
+                TypeReprEnv.Empty.ForTypars tps
+            else
+                let hostList = Zset.elements hostTyvars
+                let tyenvWithHost = TypeReprEnv.Empty.Add hostList
+                tyenvWithHost.Add tps
+        else
+            TypeReprEnv.Empty.ForTypars tps
+
     let methodArgTys, paramInfos = curriedArgInfos |> List.concat |> List.unzip
     let ilMethodArgTys = GenParamTypes cenv m tyenvUnderTypars false methodArgTys
     let ilRetTy = GenReturnType cenv m tyenvUnderTypars returnTy
@@ -4749,16 +4794,57 @@ and GenApp (cenv: cenv) cgbuf eenv (f, fty, tyargs, curriedArgs, m) sequel =
 
             // numEnclILTypeArgs will include unit-of-measure args, unfortunately. For now, just cut-and-paste code from GetMemberCallInfo
             // @REVIEW: refactor this
+            // For re-hosted closures (TLR fHat) the call-site Val has MemberInfo=None and
+            // is NOT the Val that CheckExpressions registered in g.RealsigClosureParents
+            // (keyed by the original closure-binding Val's stamp; TLR never re-registers the
+            // re-hosted method's Val). Recover the host/owner typars from the caller's
+            // ambient type-parameter environment (eenv.tyenv), which contains the host
+            // class's typars (e.g. 'T, 'U of ConcatEnumerator<'T,'U>) because the call
+            // site is inside a member of that class. This works uniformly for all
+            // re-hosted closures, including those (like iter@272) whose *type* contains
+            // no free occurrences of the host typars (the typars are captured only as
+            // substituted values in the closure body).
+            let ambientTypars =
+                match vref.MemberInfo with
+                | Some _ when not vref.IsExtensionMember -> []
+                | _ when cenv.g.realsig ->
+                    (match cenv.g.RealsigClosureParentTryGet(vref.Deref) with
+                        | Some info -> info.ownerTypars
+                        | None ->
+                            // Re-hosted TLR closures are compiled as top-level methods that are
+                            // not member/module bindings. Only those inherit the host class's
+                            // typars; ordinary module functions (e.g. MyCollections.IEnumerator.check)
+                            // must not, or a non-generic module gets spurious generic args.
+                            if
+                                (vref.IsCompiledAsTopLevel || vref.IsCompilerGenerated)
+                                && not (vref.IsMember || vref.IsMemberOrModuleBinding)
+                            then
+                                Zset.elements (eenv.tyenv.AsUserProvidedTypars())
+                            else
+                                [])
+
+                | _ -> []
+
             let numEnclILTypeArgs =
                 match vref.MemberInfo with
                 | Some _ when not vref.IsExtensionMember -> List.length (vref.MemberApparentEntity.Typars |> DropErasedTypars)
+                | _ when cenv.g.realsig ->
+                    (match cenv.g.RealsigClosureParentTryGet(vref.Deref) with
+                        | Some info -> List.length info.ownerTypars
+                        | None -> List.length ambientTypars)
                 | _ -> 0
 
             let ilEnclArgTys, ilMethArgTys =
-                if ilTyArgs.Length < numEnclILTypeArgs then
-                    error (InternalError("length mismatch", m))
+                if List.length ambientTypars > 0 then
+                    // The closure's type does not mention the host typars (e.g. iter@272),
+                    // so they are not in ilTyArgs. Reconstruct the class-instantiating
+                    // args from the caller's ambient typars instead.
+                    (ambientTypars |> List.map (fun tp -> GenType cenv m eenv.tyenv (mkTyparTy tp)), ilTyArgs)
+                else
+                    (if ilTyArgs.Length < numEnclILTypeArgs then
+                         error (InternalError("length mismatch", m))
 
-                List.splitAt numEnclILTypeArgs ilTyArgs
+                     List.splitAt numEnclILTypeArgs ilTyArgs)
 
             let boxity = mspec.DeclaringType.Boxity
             let valu = boxity = AsValue
@@ -6211,9 +6297,9 @@ and GenDefaultValue cenv cgbuf eenv (ty, m) =
 
                 EmitGetLocal cgbuf ilTy locIdx)
 
-//--------------------------------------------------------------------------
+//----------------------------------------------------------------------------
 // Generate generic parameters
-//--------------------------------------------------------------------------
+//----------------------------------------------------------------------------
 
 and GenGenericParam cenv eenv (tp: Typar) =
     let g = cenv.g
@@ -10248,7 +10334,44 @@ and GenMethodForBinding
 
     // The type parameters of the method's type are different to the type parameters
     // for the big lambda ("tlambda") of the implementation of the method.
-    let eenvUnderMethLambdaTypars = EnvForTypars methLambdaTypars eenv
+    // [realsig+] For a closure re-hosted as a nested static method of its host class,
+    // the body's tyenv must include the host class's canonical typars (from eenv.tyenv,
+    // set by EnvForTycon in GenTypeDef) at IL indices 0..k-1, and the method's own
+    // typars at k..n-1. The default EnvForTypars resets to only the method's own typars,
+    // so the body's references to the class typars fall back to ChooseTyparSolution
+    // (concrete types) instead of the class's !0/!1.
+    let eenvUnderMethLambdaTypars =
+        if cenv.g.realsig && not (Option.isSome v.MemberInfo) && not v.IsExtensionMember then
+            let ambientTypars =
+                match v.MemberInfo with
+                | Some _ when not v.IsExtensionMember -> []
+                | _ when cenv.g.realsig ->
+                    (match cenv.g.RealsigClosureParentTryGet(v) with
+                        | Some info -> info.ownerTypars
+                        | None ->
+                            // Re-hosted TLR closures are compiled as top-level methods that are
+                            // not member/module bindings. Only those inherit the host class's
+                            // typars; ordinary module functions (e.g. MyCollections.IEnumerator.check)
+                            // must not, or a non-generic module gets spurious generic args.
+                            if
+                                (v.IsCompiledAsTopLevel || v.IsCompilerGenerated)
+                                && not (v.IsMember || v.IsMemberOrModuleBinding)
+                            then
+                                Zset.elements (eenv.tyenv.AsUserProvidedTypars())
+                            else
+                                [])
+
+                | _ -> []
+
+            if List.isEmpty ambientTypars then
+                EnvForTypars methLambdaTypars eenv
+            else
+                { eenv with
+                    tyenv = (eenv.tyenv.ResetTypars().Add ambientTypars).Add methLambdaTypars
+                }
+        else
+            EnvForTypars methLambdaTypars eenv
+
     let eenvUnderMethTypeClassTypars = EnvForTypars ctps eenv
     let eenvUnderMethTypeTypars = AddTyparsToEnv mtps eenvUnderMethTypeClassTypars
 
@@ -11062,6 +11185,12 @@ and AllocValReprWithinExpr cenv cgbuf endMark cloc v eenv =
                     CompLocForTopLevelFunctions eenv.moduleCloc
                 else
                     CompLocForInitClass eenv.moduleCloc
+            else if
+                // With realsig=true these vals are hosted on the type that originated the closure
+                // With realsig=false these vals are hosted on the module enclosing the type that originated the closure
+                cenv.g.realsig
+            then
+                cloc
             else
                 eenv.moduleCloc
         else

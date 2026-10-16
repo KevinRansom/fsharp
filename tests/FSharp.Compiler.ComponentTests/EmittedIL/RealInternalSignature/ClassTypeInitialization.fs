@@ -554,21 +554,212 @@ printfn "%A" (MyClass.result())
     [<InlineData(false, true)>]         // Regular Optimize
     [<InlineData(false, false)>]        // Regular NoOptimize
     [<Theory>]
-    let ``nested generic closure`` (realSig, optimize) =
+    let ``nested generic closure`` (realsig, optimize) =
         let path = __SOURCE_DIRECTORY__ ++ "nested_generic_closure.fs"
         let source = File.ReadAllText (path)
 
-        FSharp source
-        |> withName "NestedGenericClosure"
-        |> asExe
-        |> withRealInternalSignature realSig
-        |> withOptimization optimize
-        |> compileAndRun
-        |> shouldSucceed
-        |> verifyPEFileWithSystemDlls
-        |> withOutputContainsAllInOrderWithWildcards [
-            "All Classes and Methods in*NestedGenericClosure.exe Verified."
-            ]
+        let result =
+            FSharp source
+            |> withName "NestedGenericClosure"
+            |> asExe
+            |> withRealInternalSignature realsig
+            |> withOptimization optimize
+            |> compileAndRun
+            |> verifyPEFileWithSystemDlls
+            |> withOutputContainsAllInOrderWithWildcards [
+                "All Classes and Methods in*NestedGenericClosure.exe Verified."
+                ]
+            |> shouldSucceed
+
+        // Verify rehoming operates correctly
+        // The text is sufficient to verify the correct homing it is not the entire line of the il.  It is sufficient to ensure rehoming occured.
+        let (present, absent) =
+            match realsig, optimize with
+            | false, false ->
+                [
+                    "instance void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/takeInner@303<!T,!U>::.ctor"
+                    "instance void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/takeOuter@309<!T,!U>::.ctor"
+                    "instance void Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/iter@273::.ctor"
+                ],
+                [
+                    "instance void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2/takeInner@303<!T,!U>::.ctor"
+                    "instance void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2/takeOuter@309<!T,!U>::.ctor"
+                    "instance void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2/iter@273<!T,!U>::.ctor"
+                    "call       bool Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers::takeInner@301<!!0,!!1>"
+                    "call       bool Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers::takeOuter@308<!!0,!!1>"
+                    "call       void Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers::iter@272"
+                    "call       bool class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U>::takeInner@301(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!0,!1>,"
+                    "call       bool class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U>::takeOuter@308(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!0,!1>,"
+                    "call       void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U>::iter@272(class [FSharp.Core]Microsoft.FSharp.Collections.FSharpList`1<class [FSharp.Core]Microsoft.FSharp.Core.FSharpFunc`2<class [FSharp.Core]Microsoft.FSharp.Core.Unit,class [FSharp.Core]Microsoft.FSharp.Core.Unit>>)"
+                ]
+            | false, true ->
+                [
+                    "call       bool Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers::takeInner@301<!!0,!!1>"
+                    "call       bool Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers::takeOuter@308<!!0,!!1>"
+                    "call       void Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers::iter@272"
+                ],
+                [
+                    "instance void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/takeInner@303<!T,!U>::.ctor"
+                    "instance void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/takeOuter@309<!T,!U>::.ctor"
+                    "instance void Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/iter@273::.ctor"
+                    "instance void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2/takeInner@303<!T,!U>::.ctor"
+                    "instance void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2/takeOuter@309<!T,!U>::.ctor"
+                    "instance void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2/iter@273<!T,!U>::.ctor"
+                    "call       bool class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U>::takeInner@301(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!0,!1>,"
+                    "call       bool class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U>::takeOuter@308(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!0,!1>,"
+                    "call       void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U>::iter@272(class [FSharp.Core]Microsoft.FSharp.Collections.FSharpList`1<class [FSharp.Core]Microsoft.FSharp.Core.FSharpFunc`2<class [FSharp.Core]Microsoft.FSharp.Core.Unit,class [FSharp.Core]Microsoft.FSharp.Core.Unit>>)"
+                ]
+            | true, false ->
+                [
+                    "instance void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2/takeInner@303<!T,!U>::.ctor"
+                    "instance void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2/takeOuter@309<!T,!U>::.ctor"
+                    "instance void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2/iter@273<!T,!U>::.ctor"
+                ],
+                [
+                    "instance void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/takeInner@303<!T,!U>::.ctor"
+                    "instance void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/takeOuter@309<!T,!U>::.ctor"
+                    "instance void Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/iter@273::.ctor"
+                    "call       bool Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers::takeInner@301<!!0,!!1>"
+                    "call       bool Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers::takeOuter@308<!!0,!!1>"
+                    "call       void Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers::iter@272"
+                    "call       bool class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U>::takeInner@301(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!0,!1>,"
+                    "call       bool class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U>::takeOuter@308(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!0,!1>,"
+                    "call       void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U>::iter@272(class [FSharp.Core]Microsoft.FSharp.Collections.FSharpList`1<class [FSharp.Core]Microsoft.FSharp.Core.FSharpFunc`2<class [FSharp.Core]Microsoft.FSharp.Core.Unit,class [FSharp.Core]Microsoft.FSharp.Core.Unit>>)"
+                ]
+            | true, true ->
+                [
+                    "call       bool class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U>::takeInner@301(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!0,!1>,"
+                    "call       bool class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U>::takeOuter@308(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!0,!1>,"
+                    "call       void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U>::iter@272(class [FSharp.Core]Microsoft.FSharp.Collections.FSharpList`1<class [FSharp.Core]Microsoft.FSharp.Core.FSharpFunc`2<class [FSharp.Core]Microsoft.FSharp.Core.Unit,class [FSharp.Core]Microsoft.FSharp.Core.Unit>>)"
+                ],
+                [
+                    "instance void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/takeInner@303<!T,!U>::.ctor"
+                    "instance void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/takeOuter@309<!T,!U>::.ctor"
+                    "instance void Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/iter@273::.ctor"
+                    "call       bool Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers::takeInner@301<!!0,!!1>"
+                    "call       bool Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers::takeOuter@308<!!0,!!1>"
+                    "call       void Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers::iter@272"
+                    "call       bool Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers::takeInner@301<!!0,!!1>"
+                    "call       bool Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers::takeOuter@308<!!0,!!1>"
+                    "call       void Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers::iter@272"
+                ]
+        result |> verifyILPresent present
+        result |> verifyILNotPresent absent
+
+        // Verify IL conforms to clr rules
+        result
+
+    [<InlineData(true, true)>]          // RealSig Optimize
+    [<InlineData(true, false)>]         // RealSig NoOptimize
+    [<InlineData(false, true)>]         // Regular Optimize
+    [<InlineData(false, false)>]        // Regular NoOptimize
+    [<Theory>]
+    let ``nested generic closure with generic method`` (realsig, optimize) =
+        let path = __SOURCE_DIRECTORY__ ++ "nested_generic_closure_with_generic_method.fs"
+        let source = File.ReadAllText (path)
+
+        let result =
+            FSharp source
+            |> withName "NestedGenericClosureWithGenericMethod"
+            |> asExe
+            |> withRealInternalSignature realsig
+            |> withOptimization optimize
+            |> compileAndRun
+            |> verifyPEFileWithSystemDlls
+            |> withOutputContainsAllInOrderWithWildcards [
+                "All Classes and Methods in*NestedGenericClosureWithGenericMethod.exe Verified."
+                ]
+            |> shouldSucceed
+
+        // Verify rehoming operates correctly
+        // The text is sufficient to verify the correct homing it is not the entire line of the il.  It is sufficient to ensure rehoming occured.
+        let (present, absent) =
+            match realsig, optimize with
+            | false, false ->
+                [
+                    "instance void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/takeInner@296<!T,!U,!!V>::.ctor(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!0,!1>)"
+                    "instance void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/takeOuter@301<!T,!U,!V>::.ctor(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!0,!1>,"
+                    "instance void Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/iter@262::.ctor()"
+                    ".class auto ansi serializable sealed nested assembly beforefieldinit takeInner@296<T,(class [mscorlib]System.Collections.Generic.IEnumerable`1<!T>) U,V>"
+                    ".class auto ansi serializable sealed nested assembly beforefieldinit takeOuter@301<T,(class [mscorlib]System.Collections.Generic.IEnumerable`1<!T>) U,V>"
+                    ".class auto ansi serializable sealed nested assembly beforefieldinit iter@262"
+                ],
+                [
+                    "call       bool Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers::takeInner@295<!T,!U,!V>(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!!0,!!1>,"
+                    "call       bool Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers::takeOuter@300<!!0,!!1,!V>(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!!0,!!1>,"
+                    "call       void Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers::iter@261(class [FSharp.Core]Microsoft.FSharp.Collections.FSharpList`1<class [FSharp.Core]Microsoft.FSharp.Core.FSharpFunc`2<class [FSharp.Core]Microsoft.FSharp.Core.Unit,class [FSharp.Core]Microsoft.FSharp.Core.Unit>>)"
+                    ".method assembly static bool  takeInner@295<T,(class [mscorlib]System.Collections.Generic.IEnumerable`1<!!T>) U,V>(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!!T,!!U> x,"
+                    ".method assembly static bool  takeOuter@300<T,(class [mscorlib]System.Collections.Generic.IEnumerable`1<!!T>) U,V>(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!!T,!!U> x,"
+                    ".method assembly static void  iter@261(class [FSharp.Core]Microsoft.FSharp.Collections.FSharpList`1<class [FSharp.Core]Microsoft.FSharp.Core.FSharpFunc`2<class [FSharp.Core]Microsoft.FSharp.Core.Unit,class [FSharp.Core]Microsoft.FSharp.Core.Unit>> comps) cil managed"
+                ]
+            | false, true ->
+                [
+                    "call       bool Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers::takeInner@295<!T,!U,!!0>(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!!0,!!1>,"
+                    "call       bool Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers::takeOuter@300<!!0,!!1,!!2>(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!!0,!!1>,"
+                    "call       void Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers::iter@261(class [FSharp.Core]Microsoft.FSharp.Collections.FSharpList`1<class [FSharp.Core]Microsoft.FSharp.Core.FSharpFunc`2<class [FSharp.Core]Microsoft.FSharp.Core.Unit,class [FSharp.Core]Microsoft.FSharp.Core.Unit>>)"
+                    ".method assembly static bool  takeInner@295<T,(class [mscorlib]System.Collections.Generic.IEnumerable`1<!!T>) U,V>(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!!T,!!U> x,"
+                    ".method assembly static bool  takeOuter@300<T,(class [mscorlib]System.Collections.Generic.IEnumerable`1<!!T>) U,V>(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!!T,!!U> x,"
+                    ".method assembly static void  iter@261(class [FSharp.Core]Microsoft.FSharp.Collections.FSharpList`1<class [FSharp.Core]Microsoft.FSharp.Core.FSharpFunc`2<class [FSharp.Core]Microsoft.FSharp.Core.Unit,class [FSharp.Core]Microsoft.FSharp.Core.Unit>> comps) cil managed"
+                ],
+                [
+                    "instance void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/takeInner@296<!T,!U,!!V>::.ctor(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!0,!1>)"
+                    "instance void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/takeOuter@301<!T,!U,!V>::.ctor(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!0,!1>,"
+                    "instance void Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/iter@262::.ctor()"
+                    ".class auto ansi serializable sealed nested assembly beforefieldinit takeInner@296<T,(class [mscorlib]System.Collections.Generic.IEnumerable`1<!T>) U,V>"
+                    ".class auto ansi serializable sealed nested assembly beforefieldinit takeOuter@301<T,(class [mscorlib]System.Collections.Generic.IEnumerable`1<!T>) U,V>"
+                    ".class auto ansi serializable sealed nested assembly beforefieldinit iter@262"
+                ]
+            | true, false ->
+                [
+                    "instance void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2/takeInner@296<!T,!U,!!V>::.ctor(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!0,!1>)"
+                    "instance void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2/takeOuter@301<!T,!U,!V>::.ctor(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!0,!1>,"
+                    "instance void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2/iter@262<!T,!U,!V>::.ctor()"
+                    ".class auto ansi serializable sealed nested assembly beforefieldinit takeInner@296<T,(class [mscorlib]System.Collections.Generic.IEnumerable`1<!T>) U,V>"
+                    ".class auto ansi serializable sealed nested assembly beforefieldinit takeOuter@301<T,(class [mscorlib]System.Collections.Generic.IEnumerable`1<!T>) U,V>"
+                    ".class auto ansi serializable sealed nested assembly beforefieldinit iter@262<T,(class [mscorlib]System.Collections.Generic.IEnumerable`1<!T>) U,V>"
+                ],
+                [
+                    "call       bool Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers::takeInner@295<!T,!U,!!0>(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!!0,!!1>,"
+                    "call       bool Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers::takeOuter@300<!!0,!!1,!!2>(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!!0,!!1>,"
+                    "call       void Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers::iter@261(class [FSharp.Core]Microsoft.FSharp.Collections.FSharpList`1<class [FSharp.Core]Microsoft.FSharp.Core.FSharpFunc`2<class [FSharp.Core]Microsoft.FSharp.Core.Unit,class [FSharp.Core]Microsoft.FSharp.Core.Unit>>)"
+                    ".method assembly static bool  takeInner@295<T,(class [mscorlib]System.Collections.Generic.IEnumerable`1<!!T>) U,V>(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!!T,!!U> x,"
+                    ".method assembly static bool  takeOuter@300<T,(class [mscorlib]System.Collections.Generic.IEnumerable`1<!!T>) U,V>(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!!T,!!U> x,"
+                    ".method assembly static void  iter@261(class [FSharp.Core]Microsoft.FSharp.Collections.FSharpList`1<class [FSharp.Core]Microsoft.FSharp.Core.FSharpFunc`2<class [FSharp.Core]Microsoft.FSharp.Core.Unit,class [FSharp.Core]Microsoft.FSharp.Core.Unit>> comps) cil managed"
+                    "instance void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/takeInner@296<!T,!U,!!V>::.ctor(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!0,!1>)"
+                    "instance void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/takeOuter@301<!T,!U,!V>::.ctor(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!0,!1>,"
+                    "instance void Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/iter@262::.ctor()"
+                ]
+            | true, true ->
+                [
+                    "call       bool class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U>::takeInner@295<!!0>(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!0,!1>,"
+                    "call       bool class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U>::takeOuter@300<!!0>(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!0,!1>,"
+                    "call       void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U>::iter@261(class [FSharp.Core]Microsoft.FSharp.Collections.FSharpList`1<class [FSharp.Core]Microsoft.FSharp.Core.FSharpFunc`2<class [FSharp.Core]Microsoft.FSharp.Core.Unit,class [FSharp.Core]Microsoft.FSharp.Core.Unit>>)"
+                    ".method assembly static bool  takeInner@295<V>(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U> x,"
+                    ".method assembly static bool  takeOuter@300<V>(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!T,!U> x,"
+                    ".method assembly static void  iter@261(class [FSharp.Core]Microsoft.FSharp.Collections.FSharpList`1<class [FSharp.Core]Microsoft.FSharp.Core.FSharpFunc`2<class [FSharp.Core]Microsoft.FSharp.Core.Unit,class [FSharp.Core]Microsoft.FSharp.Core.Unit>> comps) cil managed"
+                ],
+                [
+                    "call       bool Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers::takeInner@295<!T,!U,!!0>(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!!0,!!1>,"
+                    "call       bool Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers::takeOuter@300<!!0,!!1,!!2>(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!!0,!!1>,"
+                    "call       void Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers::iter@261(class [FSharp.Core]Microsoft.FSharp.Collections.FSharpList`1<class [FSharp.Core]Microsoft.FSharp.Core.FSharpFunc`2<class [FSharp.Core]Microsoft.FSharp.Core.Unit,class [FSharp.Core]Microsoft.FSharp.Core.Unit>>)"
+                    ".method assembly static bool  takeInner@295<T,(class [mscorlib]System.Collections.Generic.IEnumerable`1<!!T>) U,V>(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!!T,!!U> x,"
+                    ".method assembly static bool  takeOuter@300<T,(class [mscorlib]System.Collections.Generic.IEnumerable`1<!!T>) U,V>(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!!T,!!U> x,"
+                    "instance void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/takeInner@296<!T,!U,!!V>::.ctor(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!0,!1>)"
+                    "instance void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/takeOuter@301<!T,!U,!V>::.ctor(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!0,!1>,"
+                    "instance void Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/iter@262::.ctor()"
+                    "instance void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2/takeInner@296<!T,!U,!!V>::.ctor(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!0,!1>)"
+                    "instance void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2/takeOuter@301<!T,!U,!V>::.ctor(class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2<!0,!1>,"
+                    "instance void class Microsoft.FSharp.Core.CompilerServices.RuntimeHelpers/ConcatEnumerator`2/iter@262<!T,!U,!V>::.ctor()"
+                    ".class auto ansi serializable sealed nested assembly beforefieldinit takeInner@296<T,(class [mscorlib]System.Collections.Generic.IEnumerable`1<!T>) U,V>"
+                    ".class auto ansi serializable sealed nested assembly beforefieldinit takeOuter@301<T,(class [mscorlib]System.Collections.Generic.IEnumerable`1<!T>) U,V>"
+                    ".class auto ansi serializable sealed nested assembly beforefieldinit iter@262<T,(class [mscorlib]System.Collections.Generic.IEnumerable`1<!T>) U,V>"
+                ]
+        result |> verifyILPresent present
+        result |> verifyILNotPresent absent
+
+        // Verify IL conforms to clr rules
+        result
+
 
     [<InlineData(true, true)>]          // RealSig Optimize
     [<InlineData(true, false)>]         // RealSig NoOptimize
