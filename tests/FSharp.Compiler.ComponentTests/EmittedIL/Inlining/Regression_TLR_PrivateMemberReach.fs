@@ -55,18 +55,18 @@ module Regression_TLR_PrivateMemberReach =
         let src = File.ReadAllText (path)
         let (present, absent) =
             match realsig, optimize with
-            | false, false -> [ "class Sample/go@11<!T,!!U>::skip" ], [ "class Sample/Safe`1/go@11<!T,!U>::go";"Sample::go@"; "Sample::skip@"; "Sample::skip@" ]
-            | false, true -> [ "Sample::go@"; "Sample::skip@" ], [ "class Sample/Safe`1/go@11<!T,!U>::go";"class Sample/go@11<!T,!!U>::skip"; "Safe`1/go@" ]
-            | true, false -> [ "Safe`1/go@"; "Safe`1/skip@" ], [ "class Sample/Safe`1/go@11<!T,!U>::go";"class Sample/go@11<!T,!!U>::skip"; "Sample::go@"; "Sample::skip@" ]
-            | true, true -> [ "class Sample/Safe`1/go@11<!T,!U>::go"; "Sample::skip@" ], [ "class Sample/go@11<!T,!!U>::skip"; "Sample::go@" ]
+            | false, false -> [ "class Sample/go@10<!T,!!U>::skip" ], [ "class Sample/Safe`1/go@11<!T,!U>::go";"Sample::go@"; "Sample::skip@"; "Sample::skip@" ]
+            | false, true -> [ "Sample::go@"; "Sample::skip@" ], [ "class Sample/Safe`1/go@10<!T,!U>::go";"class Sample/go@10<!T,!!U>::skip"; "Safe`1/go@" ]
+            | true, false -> [ "Safe`1/go@"; "Safe`1/skip@" ], [ "class Sample/Safe`1/go@10<!T,!U>::go";"class Sample/go@10<!T,!!U>::skip"; "Sample::go@"; "Sample::skip@" ]
+            | true, true -> [ "class Sample/Safe`1/go@10<!T,!U>::go"; "Sample::skip@" ], [ "class Sample/go@10<!T,!!U>::skip"; "Sample::go@" ]
 
         let result =
             src
             |> compileWithFlags realsig optimize
-            |> compile      //AndRun
+            |> compileAndRun
             |> shouldSucceed
             |> verifyPEFileWithSystemDlls
-            //|> shouldSucceed
+            |> shouldSucceed
         result |> verifyILPresent present
         result |> verifyILNotPresent absent
 
