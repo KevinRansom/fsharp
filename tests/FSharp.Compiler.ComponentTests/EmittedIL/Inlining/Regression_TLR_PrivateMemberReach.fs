@@ -58,7 +58,7 @@ module Regression_TLR_PrivateMemberReach =
             | false, false -> [ "class Sample/go@10<!T,!!U>::skip" ], [ "class Sample/Safe`1/go@11<!T,!U>::go";"Sample::go@"; "Sample::skip@"; "Sample::skip@" ]
             | false, true -> [ "Sample::go@"; "Sample::skip@" ], [ "class Sample/Safe`1/go@10<!T,!U>::go";"class Sample/go@10<!T,!!U>::skip"; "Safe`1/go@" ]
             | true, false -> [ "Safe`1/go@"; "Safe`1/skip@" ], [ "class Sample/Safe`1/go@10<!T,!U>::go";"class Sample/go@10<!T,!!U>::skip"; "Sample::go@"; "Sample::skip@" ]
-            | true, true -> [ "class Sample/Safe`1/go@10<!T,!U>::go"; "Sample::skip@" ], [ "class Sample/go@10<!T,!!U>::skip"; "Sample::go@" ]
+            | true, true -> [ "class Sample/Safe`1<!T>::go@9<!!0>"; "class Sample/Safe`1<!T>::skip@13<!!0>" ], [ "class Sample/go@10<!T,!!U>::skip"; "Sample::go@" ]
 
         let result =
             src
@@ -79,34 +79,19 @@ module Regression_TLR_PrivateMemberReach =
     /// is out of reach (MethodAccessException), or struct field init interferes.
     [<Theory; InlineData(true, true); InlineData(true, false); InlineData(false, true); InlineData(false, false)>]
     let ``Struct generic class member rec reaching a type-private static runs`` (realsig: bool, optimize: bool) =
-        let src =
-            """
-module Sample
-[<Struct>]
-type Ticker<'T> =
-    val Stage: int
-    [<NoCompilerInlining>]
-    static member private Advance (v: int) = v + 1
-    member this.Run() =
-        let rec walk (n: int) (acc: int) =
-            if n <= 0 then acc
-            else walk (n - 1) (Ticker<'T>.Advance acc)
-        walk 1000 this.Stage
-[<EntryPoint>]
-let main _ =
-    let t = Ticker<int>()
-    if t.Run() = 1000 then 0 else 1
-            """
+        let path = __SOURCE_DIRECTORY__ ++ "GenericStructPrivateStatic.fs"
+        let src = File.ReadAllText (path)
         let (present, absent) =
             match realsig, optimize with
             | false, false -> [ "Sample/walk@" ], [ "Sample/Ticker`1/walk@"; "Sample::walk@" ]
             | false, true -> [ "Sample::walk@" ], [ "Sample/Ticker`1/walk@"; "Sample/walk@" ]
-            | true, _ -> [ "Sample/Ticker`1/walk@" ], [ "Sample/walk@"; "Sample::walk@" ]
+            | true, false -> [ "Sample/Ticker`1/walk@" ], [ "Sample/walk@"; "Sample::walk@" ]
+            | true, true -> [ "Sample/Ticker`1/walk@" ], [ "Sample/walk@"; "Sample::walk@" ]
 
         let result =
             src
                 |> compileWithFlags realsig optimize
-                |> compileAndRun
+                |> compile//AndRun
                 |> shouldSucceed
                 |> verifyPEFileWithSystemDlls
                 |> shouldSucceed

@@ -1703,42 +1703,31 @@ let ComputeStorageForFSharpMember cenv valReprInfo memberInfo (vref: ValRef) m =
 
     Method(valReprInfo, vref, mspec, mspecW, m, ctps, mtps, curriedArgInfos, paramInfos, witnessInfos, methodArgTys, retInfo)
 
+
+let GetValReprTypeInfoInCompiledForm g valReprInfo (vref: ValRef) m =
+    let numEnclosingTypars = CountEnclosingTyparsOfActualParentOfVal vref.Deref
+
+    let tps, witnessInfos, curriedArgInfos, returnTy, retInfo =
+        GetValReprTypeInCompiledForm g valReprInfo numEnclosingTypars vref.Type m
+
+    let tps =
+        match g.RealsigClosureParentTryGet(vref.Deref) with
+        | Some info when g.realsig && vref.IsCompiledAsTopLevel -> info.ownerTypars @ tps
+        | _ -> tps
+
+    tps, witnessInfos, curriedArgInfos, returnTy, retInfo
+
 /// Compute the representation information for an F#-declared function in a module or an F#-declared extension member.
 /// Note, there is considerable overlap with ComputeStorageForFSharpMember/GetMethodSpecForMemberVal and these could be
 /// rationalized.
 let ComputeStorageForFSharpFunctionOrFSharpExtensionMember (cenv: cenv) cloc valReprInfo (vref: ValRef) m =
     let g = cenv.g
     let nm = vref.CompiledName g.CompilerGlobalState
-    let numEnclosingTypars = CountEnclosingTyparsOfActualParentOfVal vref.Deref
 
     let tps, witnessInfos, curriedArgInfos, returnTy, retInfo =
-        GetValReprTypeInCompiledForm g valReprInfo numEnclosingTypars vref.Type m
+        GetValReprTypeInfoInCompiledForm g valReprInfo vref m
 
-    // [realsig+] For a re-hosted nested method (a closure re-hosted as a method of its host class),
-    // the method's parameter/return types reference the host class's generic parameters ambiently.
-    // They are NOT part of the method's own generic-parameter list (tps), so we add them to the
-    // tyenv (so they resolve to the class's IL type variables) but NOT to ilMethodInst (so the
-    // method does not re-declare them).
-    //
-    // We extract the host typars from vref.Type (the source of the param types) by computing all
-    // free typars in vref.Type and subtracting tps (the method's declared typars). This ensures the
-    // typars we add to tyenv are the SAME objects as those in the param types (avoiding stamp
-    // mismatches with typars stored earlier in TLR).
-    let tyenvUnderTypars =
-        if g.realsig then
-            let allTyvars = (freeInType CollectTyparsNoCaching vref.Type).FreeTypars
-            let declaredTyvars = Zset.ofList typarOrder tps
-            let hostTyvars = Zset.diff allTyvars declaredTyvars
-
-            if Zset.isEmpty hostTyvars then
-                TypeReprEnv.Empty.ForTypars tps
-            else
-                let hostList = Zset.elements hostTyvars
-                let tyenvWithHost = TypeReprEnv.Empty.Add hostList
-                tyenvWithHost.Add tps
-        else
-            TypeReprEnv.Empty.ForTypars tps
-
+    let tyenvUnderTypars = TypeReprEnv.Empty.ForTypars tps
     let methodArgTys, paramInfos = curriedArgInfos |> List.concat |> List.unzip
     let ilMethodArgTys = GenParamTypes cenv m tyenvUnderTypars false methodArgTys
     let ilRetTy = GenReturnType cenv m tyenvUnderTypars returnTy
