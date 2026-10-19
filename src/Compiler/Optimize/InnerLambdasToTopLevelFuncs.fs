@@ -896,7 +896,7 @@ let CreateNewValuesForTLR (scope: PerFileNamingScope) g tlrS arityM fclassM envP
         let fHat = mkLocalNameTypeArity f.IsCompilerGenerated m fHatName fHatTy (Some fHatArity)
         if g.realsig then
             match g.RealsigClosureParentTryGet(f) with
-            | Some info -> g.AddRealsigClosureParent(fHat, info.ownerTypars)
+            | Some info -> g.AddRealsigClosureParent(fHat, info.ownerTypars, info.ownerTycon)
             | None -> ()
         fHat
 

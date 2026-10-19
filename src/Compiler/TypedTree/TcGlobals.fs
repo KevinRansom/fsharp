@@ -199,7 +199,8 @@ type CompilationMode =
 [<NoEquality; NoComparison>]
 type RealsigClosureParentInfo =
     { closureVal: Val
-      ownerTypars: Typars }
+      ownerTypars: Typars
+      ownerTycon: TyconRef option }
 
 type TcGlobals(
     compilingFSharpCore: bool,
@@ -1212,8 +1213,8 @@ type TcGlobals(
 
   member _.realsig = realsig
 
-  member _.AddRealsigClosureParent(closureVal: Val, ownerTypars: Typars) =
-      realsigClosureParents <- Map.add closureVal.Stamp { closureVal = closureVal; ownerTypars = ownerTypars } realsigClosureParents
+  member _.AddRealsigClosureParent(closureVal: Val, ownerTypars: Typars, ownerTycon: TyconRef option) =
+      realsigClosureParents <- Map.add closureVal.Stamp { closureVal = closureVal; ownerTypars = ownerTypars; ownerTycon = ownerTycon } realsigClosureParents
 
   member _.RealsigClosureParentTryGet(closureVal: Val) =
       Map.tryFind closureVal.Stamp realsigClosureParents

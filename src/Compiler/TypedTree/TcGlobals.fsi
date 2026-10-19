@@ -19,7 +19,8 @@ val internal DummyFileNameForRangesWithoutASpecificLocation: string
 [<NoEquality; NoComparison>]
 type internal RealsigClosureParentInfo =
     { closureVal: TypedTree.Val
-      ownerTypars: TypedTree.Typars }
+      ownerTypars: TypedTree.Typars
+      ownerTycon: TypedTree.TyconRef option }
 
 /// Represents an intrinsic value from FSharp.Core known to the compiler
 [<NoEquality; NoComparison; StructuredFormatDisplay("{DebugText}")>]
@@ -935,7 +936,7 @@ type internal TcGlobals =
 
     /// [realsig+] See RealsigClosureParentInfo. Register a closure's owning class typars with TcGlobals
     /// so that TLR can later subtract them from reqdTypars when re-hosting the closure as a nested method.
-    member AddRealsigClosureParent: TypedTree.Val * TypedTree.Typars -> unit
+    member AddRealsigClosureParent: TypedTree.Val * TypedTree.Typars * TypedTree.TyconRef option -> unit
 
     /// [realsig+] Look up the registered RealsigClosureParentInfo for a closure Val, if any.
     member RealsigClosureParentTryGet: TypedTree.Val -> RealsigClosureParentInfo option

@@ -1731,7 +1731,13 @@ let ComputeStorageForFSharpFunctionOrFSharpExtensionMember (cenv: cenv) cloc val
     let methodArgTys, paramInfos = curriedArgInfos |> List.concat |> List.unzip
     let ilMethodArgTys = GenParamTypes cenv m tyenvUnderTypars false methodArgTys
     let ilRetTy = GenReturnType cenv m tyenvUnderTypars returnTy
-    let ilLocTy = mkILTyForCompLoc cloc
+    let ilLocTy = 
+        match g.RealsigClosureParentTryGet(vref.Deref) with
+        | Some info when g.realsig && vref.IsCompiledAsTopLevel -> 
+            match info.ownerTycon with
+             | Some tycon -> GenType cenv m TypeReprEnv.Empty (TType_app(tycon, List.map mkTyparTy tps, g.knownWithoutNull))
+             | None -> mkILTyForCompLoc cloc
+        | _ -> mkILTyForCompLoc cloc
     let ilMethodInst = GenTypeArgs cenv m tyenvUnderTypars (List.map mkTyparTy tps)
 
     let mspec =

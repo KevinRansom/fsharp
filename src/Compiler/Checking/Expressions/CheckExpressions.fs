@@ -13279,10 +13279,11 @@ and TcIncrementalLetRecGeneralization cenv scopem
                 if g.realsig && not (Option.isNone hostTypars) then
                     let htp = hostTypars.Value
                     if not (List.isEmpty htp) then
-                        List.iter (fun (pgrbind: PreGeneralizationRecursiveBinding) ->
-                            let rbinfo = pgrbind.RecBindingInfo
-                            if rbinfo.DeclKind = DeclKind.ExpressionBinding then
-                                g.AddRealsigClosureParent(rbinfo.Val, htp)) newGeneralizableBindings
+                                 List.iter (fun (pgrbind: PreGeneralizationRecursiveBinding) ->
+                                     let rbinfo = pgrbind.RecBindingInfo
+                                     if rbinfo.DeclKind = DeclKind.ExpressionBinding then
+                                         let hostTycon = envNonRec.eFamilyType
+                                         g.AddRealsigClosureParent(rbinfo.Val, htp, hostTycon)) newGeneralizableBindings
 
                 // Generalize the bindings.
                 let newGeneralizedRecBinds = (generalizedTyparsL, newGeneralizableBindings) ||> List.map2 (TcLetrecGeneralizeBinding cenv denv )
