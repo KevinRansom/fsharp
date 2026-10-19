@@ -142,4 +142,5 @@ let newUnique() = Interlocked.Increment &uniqueCount
 let mutable private stampCount = 0L
 let newStamp() =
     let stamp = Interlocked.Increment &stampCount
+//    if stamp = 25881 then System.Diagnostics.Debugger.Break()
     stamp

@@ -159,6 +159,8 @@ let IsRefusedTLR g (f: Val) =
     let refuseTest = alreadyChosen || mutableVal || byrefVal || specialVal || dllImportStubOrOtherNeverInline || isResumableCode || isInlineIfLambda
     refuseTest
 
+#if JETTISON_BodyReferencesTypeScopedPrivate
+
 /// Under --realsig+, a TLR-lifted helper is emitted at module scope (outside its declaring
 /// type when that type is a class). If the helper's body invokes a source-`private` member
 /// of a class/struct, the CLR raises MethodAccessException at runtime because IL `private`
@@ -184,6 +186,7 @@ let BodyReferencesTypeScopedPrivate e =
                     noInterceptF z expr }
     FoldExpr folder () e |> ignore
     found
+#endif
 
 let IsMandatoryTopLevel (f: Val) =
     let specialVal = f.MemberInfo.IsSome
@@ -214,11 +217,12 @@ module Pass1_DetermineTLRAndArities =
         elif Zset.contains f xinfo.DecisionTreeBindings then
             None
 
+#if JETTISON_BodyReferencesTypeScopedPrivate
         // Under --realsig+, lifting a helper out of its declaring type would lose access to
         // any source-`private` members it references, producing MethodAccessException at runtime.
         elif g.realsig && BodyReferencesTypeScopedPrivate e then
             None
-
+#endif
         // #5302: a module-level static lifted out of its family would lose access to a protected base
         // field (FieldAccessException), so refuse the lift.
         elif
@@ -795,7 +799,18 @@ let FlatEnvPacks g fclassM topValS declist (reqdItemsMap: Zmap<BindingGroupShari
        let aenvExprFor v = exprForVal env.m (aenvFor v)
 
        // build PackedReqdItems
-       let reqdTypars = env.reqdTypars
+       // [realsig+] A re-hosted closure must not re-declare (or require) the typars it
+       // already inherits from its host class: it lives as a nested static method of that
+       // class, where those typars are already bound as !0..!n. CheckExpressions records the
+       // closure-owner typars via g.AddRealsigClosureParent, so exclude them from ep_etps.
+       // We match on (Name, Range) rather than Stamp because TLR works on cloned typars
+       // (Remap.copyAndRemapAndBindTyparsFull) that share the original's Name/Range.
+       let ownerTypars = g.RealsigOwnerTypars()
+       let reqdTypars =
+           if g.realsig && not (List.isEmpty ownerTypars) then
+               env.reqdTypars |> Zset.filter (fun (tp: Typar) -> not (List.exists (fun (o: Typar) -> tp.Name = o.Name && tp.Range = o.Range) ownerTypars))
+           else
+               env.reqdTypars
        let aenvs = Zmap.values cmap
        let pack = cmapPairs |> List.map (fun (v, aenv) -> mkInvisibleBind aenv (exprForVal env.m v))
        let unpack =
@@ -833,6 +848,8 @@ let FlatEnvPacks g fclassM topValS declist (reqdItemsMap: Zmap<BindingGroupShari
 //-------------------------------------------------------------------------
 // step3: chooseEnvPacks
 //-------------------------------------------------------------------------
+
+
 
 /// For each fclass, have an env.
 /// Required to choose an PackedReqdItems,
@@ -877,6 +894,10 @@ let CreateNewValuesForTLR (scope: PerFileNamingScope) g tlrS arityM fclassM envP
             scope.Fresh(name, m)
 
         let fHat = mkLocalNameTypeArity f.IsCompilerGenerated m fHatName fHatTy (Some fHatArity)
+        if g.realsig then
+            match g.RealsigClosureParentTryGet(f) with
+            | Some info -> g.AddRealsigClosureParent(fHat, info.ownerTypars, info.ownerTycon)
+            | None -> ()
         fHat
 
     let fs =
@@ -1054,7 +1075,7 @@ module Pass4_RewriteAssembly =
             let fHat_body = mkLetsFromBindings m envp.ep_unpack body
             let fHat_body = mkLetsFromBindings m shortRecBinds  fHat_body  // bind "f" if have short recursive calls (somewhere)
 
-            // fHat binding, f rebinding
+            // fHat binding, f rebinding.
             let fHatBind = mkMultiLambdaBind g fHat letSeqPtOpt m fHat_tps fHat_args (fHat_body, bodyTy)
             fHatBind
 

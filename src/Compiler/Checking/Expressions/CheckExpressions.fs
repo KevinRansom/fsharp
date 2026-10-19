@@ -13306,6 +13306,21 @@ and TcIncrementalLetRecGeneralization cenv scopem
 
                 let generalizedTyparsL = newGeneralizableBindings |> List.map (TcLetrecComputeAndGeneralizeGenericTyparsForBinding cenv denv freeInEnv)
 
+                // realsig+ fix: for a lambda (DeclKind.ExpressionBinding) in a class member body, the
+                // nested method inherited by TLR must NOT re-declare the class typars. Record the host
+                // class's declared typars (from the enclosing family type) per closure Val, so TLR can
+                // subtract them from reqdTypars. This also covers local let-rec bindings (e.g. takeInner/
+                // takeOuter/iter in ConcatEnumerator<'T,'U>.MoveNext) whose own EnclosingDeclaredTypars is empty.
+                let hostTypars = envNonRec.eFamilyType |> Option.map (fun (tcref: TyconRef) -> tcref.Typars)
+                if g.realsig && not (Option.isNone hostTypars) then
+                    let htp = hostTypars.Value
+                    if not (List.isEmpty htp) then
+                                 List.iter (fun (pgrbind: PreGeneralizationRecursiveBinding) ->
+                                     let rbinfo = pgrbind.RecBindingInfo
+                                     if rbinfo.DeclKind = DeclKind.ExpressionBinding then
+                                         let hostTycon = envNonRec.eFamilyType
+                                         g.AddRealsigClosureParent(rbinfo.Val, htp, hostTycon)) newGeneralizableBindings
+
                 // Generalize the bindings.
                 let newGeneralizedRecBinds = (generalizedTyparsL, newGeneralizableBindings) ||> List.map2 (TcLetrecGeneralizeBinding cenv denv )
                 let tpenv = HideUnscopedTypars (List.concat generalizedTyparsL) tpenv
@@ -13353,6 +13368,7 @@ and TcLetrecComputeAndGeneralizeGenericTyparsForBinding cenv denv freeInEnv (pgr
 
     let canGeneralizeConstrained = GeneralizationHelpers.CanGeneralizeConstrainedTyparsForDecl rbinfo.DeclKind
     let generalizedTypars = GeneralizationHelpers.ComputeAndGeneralizeGenericTypars (cenv, denv, m, freeInEnv, canInferTypars, canGeneralizeConstrained, inlineFlag, Some expr, allDeclaredTypars, maxInferredTypars, tau, isCtor)
+
     generalizedTypars
 
 /// Compute the type variables which may have member constraints that need to be canonicalized prior to generalization
