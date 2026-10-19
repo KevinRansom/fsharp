@@ -86,12 +86,12 @@ module Regression_TLR_PrivateMemberReach =
             | false, false -> [ "Sample/walk@" ], [ "Sample/Ticker`1/walk@"; "Sample::walk@" ]
             | false, true -> [ "Sample::walk@" ], [ "Sample/Ticker`1/walk@"; "Sample/walk@" ]
             | true, false -> [ "Sample/Ticker`1/walk@" ], [ "Sample/walk@"; "Sample::walk@" ]
-            | true, true -> [ "Sample/Ticker`1/walk@" ], [ "Sample/walk@"; "Sample::walk@" ]
+            | true, true -> [ "int32 valuetype Sample/Ticker`1<!T>::walk@8(int32," ], [ "Sample/walk@"; "Sample::walk@" ]
 
         let result =
             src
                 |> compileWithFlags realsig optimize
-                |> compile//AndRun
+                |> compileAndRun
                 |> shouldSucceed
                 |> verifyPEFileWithSystemDlls
                 |> shouldSucceed
