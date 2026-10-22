@@ -1513,16 +1513,30 @@ let slotSigRequiresNativePtrRewrite (g: TcGlobals) ty (sctps: Typars) (sParams: 
         |> List.exists (fun (TSlotParam(_, paramTy, _, _, _, _)) -> hasNativePtrWithTypar g sctps paramTy)
         || sRetTy |> Option.exists (hasNativePtrWithTypar g sctps))
 
+
+let GetValReprTypeInfoInCompiledForm g valReprInfo (vref: ValRef) m =
+    let numEnclosingTypars = CountEnclosingTyparsOfActualParentOfVal vref.Deref
+
+    let tps, witnessInfos, curriedArgInfos, returnTy, retInfo =
+        GetValReprTypeInCompiledForm g valReprInfo numEnclosingTypars vref.Type m
+
+    let tps =
+        match g.RealsigClosureParentTryGet(vref.Deref) with
+        | Some info when g.realsig && vref.IsCompiledAsTopLevel -> info.ownerTypars @ tps
+        | _ -> tps
+
+    tps, witnessInfos, curriedArgInfos, returnTy, retInfo
+
+
 /// Determine how a top level value is represented, when it is being represented
 /// as a method.
 let GetMethodSpecForMemberVal cenv (memberInfo: ValMemberInfo) (vref: ValRef) =
     let g = cenv.g
     let m = vref.Range
-    let numEnclosingTypars = CountEnclosingTyparsOfActualParentOfVal vref.Deref
 
     let tps, witnessInfos, curriedArgInfos, returnTy, retInfo =
         assert vref.ValReprInfo.IsSome
-        GetValReprTypeInCompiledForm g vref.ValReprInfo.Value numEnclosingTypars vref.Type m
+        GetValReprTypeInfoInCompiledForm g vref.ValReprInfo.Value vref m
 
     let tyenvUnderTypars = TypeReprEnv.Empty.ForTypars tps
     let flatArgInfos = List.concat curriedArgInfos
@@ -1703,19 +1717,6 @@ let ComputeStorageForFSharpMember cenv valReprInfo memberInfo (vref: ValRef) m =
 
     Method(valReprInfo, vref, mspec, mspecW, m, ctps, mtps, curriedArgInfos, paramInfos, witnessInfos, methodArgTys, retInfo)
 
-
-let GetValReprTypeInfoInCompiledForm g valReprInfo (vref: ValRef) m =
-    let numEnclosingTypars = CountEnclosingTyparsOfActualParentOfVal vref.Deref
-
-    let tps, witnessInfos, curriedArgInfos, returnTy, retInfo =
-        GetValReprTypeInCompiledForm g valReprInfo numEnclosingTypars vref.Type m
-
-    let tps =
-        match g.RealsigClosureParentTryGet(vref.Deref) with
-        | Some info when g.realsig && vref.IsCompiledAsTopLevel -> info.ownerTypars @ tps
-        | _ -> tps
-
-    tps, witnessInfos, curriedArgInfos, returnTy, retInfo
 
 /// Compute the representation information for an F#-declared function in a module or an F#-declared extension member.
 /// Note, there is considerable overlap with ComputeStorageForFSharpMember/GetMethodSpecForMemberVal and these could be
@@ -11179,17 +11180,15 @@ and AllocValReprWithinExpr cenv cgbuf endMark cloc v eenv =
     // storage without triggering the file's initialization when a lifted method is called.
     let effectiveCloc =
         if v.IsCompiledAsTopLevel && not v.IsMemberOrModuleBinding then
-            if eenv.moduleCloc.Enclosing.IsEmpty then
+            // With realsig=true these vals are hosted on the type that originated the closure
+            // With realsig=false these vals are hosted on the module enclosing the type that originated the closure
+            if cenv.g.realsig then
+                cloc
+            else if eenv.moduleCloc.Enclosing.IsEmpty then
                 if IsFSharpValCompiledAsMethod cenv.g v then
                     CompLocForTopLevelFunctions eenv.moduleCloc
                 else
                     CompLocForInitClass eenv.moduleCloc
-            else if
-                // With realsig=true these vals are hosted on the type that originated the closure
-                // With realsig=false these vals are hosted on the module enclosing the type that originated the closure
-                cenv.g.realsig
-            then
-                cloc
             else
                 eenv.moduleCloc
         else

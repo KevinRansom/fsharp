@@ -4792,6 +4792,24 @@ and ConsiderSplitToMethod flag threshold cenv env (e, einfo) =
             | Some id -> id.idText+suffixForVariablesThatMayNotBeEliminated
             | None -> suffixForVariablesThatMayNotBeEliminated
         let fv, fe = mkCompGenLocal m nm (mkFunTy g g.unit_ty ty)
+        // [realsig+] Register the split-thunk in the realsigClosureParents table so the
+        // downstream TLR pass (FlatEnvPacks.packEnv and createFHat) subtracts the host type's
+        // typars from the re-hosted closure's reqdTypars. Existing remap code (Remapping.fs:1783-1795)
+        // propagates the record to any clone of fv that TLR selects, and CreateNewValuesForTLR
+        // propagates it to fHat. The split body closes over the generic type's declared typars
+        // (e.g. `'a` in `BigGenericTuple<'a>`) via its free variables — e.g. the `thisCast`/
+        // `objCast` locals in `CompareTo` — so reconstruct the owner typars + TyconRef from there.
+        if g.realsig then
+            let freeInSplit = freeInExpr (CollectLocalsWithStackGuard()) e
+            let splitTypars = freeInSplit.FreeTyvars.FreeTypars |> Zset.elements
+            if not (List.isEmpty splitTypars) then
+                let splitTycon =
+                    Zset.elements freeInSplit.FreeLocals
+                    |> List.tryPick (fun (v: Val) ->
+                        match v.Type with
+                        | TType_app(tcr, _, _) when not (List.isEmpty tcr.Typars) -> Some tcr
+                        | _ -> None)
+                g.AddRealsigClosureParent(fv, splitTypars, splitTycon)
         mkInvisibleLet m fv (mkLambda m uv (e, ty))
           (primMkApp (fe, (mkFunTy g g.unit_ty ty)) [] [mkUnit g m] m),
         {einfo with FunctionSize=callSize }
