@@ -84,7 +84,7 @@ type Container<'T>(initial: 'T) =
 let main _argv =
     if Container(42).Run() = 42 then 0 else 1
 """
-        |> compileAssertNoClosuresAndRun realsig [ "static !!T  a@"; "static !!T  b@" ]
+        |> compileAssertNoClosuresAndRun realsig [ "Sample/Container`1<!T>::a@"; "Sample/Container`1<!T>::b@" ]
 
     [<Theory; InlineData(true); InlineData(false)>]
     let ``TLR with generic method on generic type`` (realsig: bool) =

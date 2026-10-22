@@ -130,7 +130,8 @@ let main _ =
             match realsig, optimize with
             | false, false -> [ "Sample/walk@"; "Sample/Ticker`1" ], [ "Sample/Ticker`1/walk@"; "Sample::walk@" ]
             | false, true -> [ "Sample::walk@"; "Sample/Ticker`1" ], [ "Sample/Ticker`1/walk@"; "Sample/Ticker`1::walk@" ]
-            | true, _ -> [ "Sample/Ticker`1/walk@" ], [ "Sample::walk@"; "Sample/Ticker`1::walk@"]
+            | true, false -> [ "Sample/Ticker`1/walk@" ], [ "Sample::walk@"; "Sample/Ticker`1::walk@"]
+            | true, true -> [ "Sample/Ticker`1<!T>::walk@" ], [ "Sample::walk@"; "Sample/Ticker`1::walk@"]
 
         let result =
             src
