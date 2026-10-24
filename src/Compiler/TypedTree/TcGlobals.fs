@@ -1219,6 +1219,23 @@ type TcGlobals(
   member _.RealsigClosureParentTryGet(closureVal: Val) =
       Map.tryFind closureVal.Stamp realsigClosureParents
 
+  /// Remove the old closureVal entry and re-add it under newVal.
+  /// If oldVal has no entry, this is a no-op.
+  member _.RealsigClosureParentRekey(oldVal: Val, newVal: Val) =
+      match Map.tryFind oldVal.Stamp realsigClosureParents with
+      | None ->
+          ()  // nothing to rekey
+      | Some info ->
+          // 1. Remove old key
+          realsigClosureParents <-
+              Map.remove oldVal.Stamp realsigClosureParents
+
+          // 2. Add new key with updated closureVal
+          let updated = { info with closureVal = newVal }
+
+          realsigClosureParents <-
+              Map.add newVal.Stamp updated realsigClosureParents
+
   /// [realsig+] Return the list of (typar Name, typar Range) pairs that must be removed from the TLR
   /// reqdTypars of a re-hosted closure. These are the owner typars of every registered
   /// RealsigClosureParentInfo. The re-hosted closure cannot re-declare (or require) the enclosing

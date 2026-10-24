@@ -68,7 +68,7 @@ let main _argv = wrapper()
 
     [<Theory; InlineData(true); InlineData(false)>]
     let ``TLR inside generic class member`` (realsig: bool) =
-        """module Sample
+        let result = """module Sample
 type Container<'T>(initial: 'T) =
     member _.Run() =
         let rec a(n, v: 'T) =
@@ -84,7 +84,11 @@ type Container<'T>(initial: 'T) =
 let main _argv =
     if Container(42).Run() = 42 then 0 else 1
 """
-        |> compileAssertNoClosuresAndRun realsig [ "Sample/Container`1<!T>::a@"; "Sample/Container`1<!T>::b@" ]
+        let expected =
+            match realsig with
+            | true -> [ " !0 class Sample/Container`1<!T>::a@4"; " !0 class Sample/Container`1<!T>::b@8" ]
+            | false -> [ "!!0 Sample::a@4"; "!!0 Sample::b@8<!!0>" ]
+        result |> compileAssertNoClosuresAndRun realsig expected
 
     [<Theory; InlineData(true); InlineData(false)>]
     let ``TLR with generic method on generic type`` (realsig: bool) =

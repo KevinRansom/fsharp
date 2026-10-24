@@ -4792,6 +4792,7 @@ and ConsiderSplitToMethod flag threshold cenv env (e, einfo) =
             | Some id -> id.idText+suffixForVariablesThatMayNotBeEliminated
             | None -> suffixForVariablesThatMayNotBeEliminated
         let fv, fe = mkCompGenLocal m nm (mkFunTy g g.unit_ty ty)
+        //TODO: review this for fragility
         // [realsig+] Register the split-thunk in the realsigClosureParents table so the
         // downstream TLR pass (FlatEnvPacks.packEnv and createFHat) subtracts the host type's
         // typars from the re-hosted closure's reqdTypars. Existing remap code (Remapping.fs:1783-1795)

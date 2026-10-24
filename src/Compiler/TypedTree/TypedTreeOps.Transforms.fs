@@ -1014,8 +1014,18 @@ module internal Rewriting =
         x |> Construct.NewModifiedTycon(remapEntityDataToNonLocal ctxt tmenv)
 
     and remapValToNonLocal ctxt tmenv inp =
-        // creates a new stamp
-        inp |> Construct.NewModifiedVal(remapValData ctxt tmenv)
+        let g = ExprRemapping.GetRemapContextGlobals ctxt
+        let v2 = inp |> Construct.NewModifiedVal(remapValData ctxt tmenv)
+        // [realsig+] NewModifiedVal mints a fresh stamp, so the registration we made for
+        // inp in TcGlobals.realsigClosureParents is keyed under the OLD stamp and is lost
+        // for v2. Propagate it to the new copy so downstream TLR (RealsigClosureParentTryGet
+        // in InnerLambdasToTopLevelFuncs createFHat / FlatEnvPacks.packEnv) can find it.
+        if g.realsig then
+            g.RealsigClosureParentRekey(inp, v2)
+        //match g.RealsigClosureParentTryGet(inp) with
+        //| Some info -> g.AddRealsigClosureParent(v2, info.ownerTypars, info.ownerTycon)
+        //| None -> ()
+        v2
 
     let ApplyExportRemappingToEntity g tmenv x =
         let ctxt = mkRemapContext g (StackGuard("RemapExprStackGuardDepth"))

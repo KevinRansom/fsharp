@@ -806,8 +806,14 @@ let FlatEnvPacks g fclassM topValS declist (reqdItemsMap: Zmap<BindingGroupShari
        // We match on (Name, Range) rather than Stamp because TLR works on cloned typars
        // (Remap.copyAndRemapAndBindTyparsFull) that share the original's Name/Range.
        let ownerTypars = g.RealsigOwnerTypars()
+       let isClassHosted =
+           fc.Vals
+           |> List.exists (fun (v: Val) ->
+               match g.RealsigClosureParentTryGet v with
+               | Some info -> info.ownerTycon.IsSome
+               | None -> false)
        let reqdTypars =
-           if g.realsig && not (List.isEmpty ownerTypars) then
+           if g.realsig && isClassHosted && not (List.isEmpty ownerTypars) then
                env.reqdTypars |> Zset.filter (fun (tp: Typar) -> not (List.exists (fun (o: Typar) -> tp.Name = o.Name && tp.Range = o.Range) ownerTypars))
            else
                env.reqdTypars
@@ -894,10 +900,10 @@ let CreateNewValuesForTLR (scope: PerFileNamingScope) g tlrS arityM fclassM envP
             scope.Fresh(name, m)
 
         let fHat = mkLocalNameTypeArity f.IsCompilerGenerated m fHatName fHatTy (Some fHatArity)
-        if g.realsig then
-            match g.RealsigClosureParentTryGet(f) with
-            | Some info -> g.AddRealsigClosureParent(fHat, info.ownerTypars, info.ownerTycon)
-            | None -> ()
+        if g.realsig then g.RealsigClosureParentRekey(f, fHat)
+            //match g.RealsigClosureParentTryGet(f) with
+            //| Some info -> g.AddRealsigClosureParent(fHat, info.ownerTypars, info.ownerTycon)
+            //| None -> ()
         fHat
 
     let fs =

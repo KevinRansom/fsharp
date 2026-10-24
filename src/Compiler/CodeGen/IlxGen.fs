@@ -1513,7 +1513,6 @@ let slotSigRequiresNativePtrRewrite (g: TcGlobals) ty (sctps: Typars) (sParams: 
         |> List.exists (fun (TSlotParam(_, paramTy, _, _, _, _)) -> hasNativePtrWithTypar g sctps paramTy)
         || sRetTy |> Option.exists (hasNativePtrWithTypar g sctps))
 
-
 let GetValReprTypeInfoInCompiledForm g valReprInfo (vref: ValRef) m =
     let numEnclosingTypars = CountEnclosingTyparsOfActualParentOfVal vref.Deref
 
@@ -1522,11 +1521,10 @@ let GetValReprTypeInfoInCompiledForm g valReprInfo (vref: ValRef) m =
 
     let tps =
         match g.RealsigClosureParentTryGet(vref.Deref) with
-        | Some info when g.realsig && vref.IsCompiledAsTopLevel -> info.ownerTypars @ tps
+        | Some info when g.realsig && vref.IsCompiledAsTopLevel && info.ownerTycon.IsSome -> info.ownerTypars @ tps
         | _ -> tps
 
     tps, witnessInfos, curriedArgInfos, returnTy, retInfo
-
 
 /// Determine how a top level value is represented, when it is being represented
 /// as a method.
@@ -1717,7 +1715,6 @@ let ComputeStorageForFSharpMember cenv valReprInfo memberInfo (vref: ValRef) m =
 
     Method(valReprInfo, vref, mspec, mspecW, m, ctps, mtps, curriedArgInfos, paramInfos, witnessInfos, methodArgTys, retInfo)
 
-
 /// Compute the representation information for an F#-declared function in a module or an F#-declared extension member.
 /// Note, there is considerable overlap with ComputeStorageForFSharpMember/GetMethodSpecForMemberVal and these could be
 /// rationalized.
@@ -1732,13 +1729,15 @@ let ComputeStorageForFSharpFunctionOrFSharpExtensionMember (cenv: cenv) cloc val
     let methodArgTys, paramInfos = curriedArgInfos |> List.concat |> List.unzip
     let ilMethodArgTys = GenParamTypes cenv m tyenvUnderTypars false methodArgTys
     let ilRetTy = GenReturnType cenv m tyenvUnderTypars returnTy
-    let ilLocTy = 
+
+    let ilLocTy =
         match g.RealsigClosureParentTryGet(vref.Deref) with
-        | Some info when g.realsig && vref.IsCompiledAsTopLevel -> 
+        | Some info when g.realsig && vref.IsCompiledAsTopLevel ->
             match info.ownerTycon with
-             | Some tycon -> GenType cenv m TypeReprEnv.Empty (TType_app(tycon, List.map mkTyparTy tps, g.knownWithoutNull))
-             | None -> mkILTyForCompLoc cloc
+            | Some tycon -> GenType cenv m TypeReprEnv.Empty (TType_app(tycon, List.map mkTyparTy tps, g.knownWithoutNull))
+            | None -> mkILTyForCompLoc cloc
         | _ -> mkILTyForCompLoc cloc
+
     let ilMethodInst = GenTypeArgs cenv m tyenvUnderTypars (List.map mkTyparTy tps)
 
     let mspec =
@@ -4841,19 +4840,23 @@ and GenApp (cenv: cenv) cgbuf eenv (f, fty, tyargs, curriedArgs, m) sequel =
                 | Some _ when not vref.IsExtensionMember -> []
                 | _ when cenv.g.realsig ->
                     (match cenv.g.RealsigClosureParentTryGet(vref.Deref) with
-                        | Some info -> info.ownerTypars
-                        | None ->
-                            // Re-hosted TLR closures are compiled as top-level methods that are
-                            // not member/module bindings. Only those inherit the host class's
-                            // typars; ordinary module functions (e.g. MyCollections.IEnumerator.check)
-                            // must not, or a non-generic module gets spurious generic args.
-                            if
-                                (vref.IsCompiledAsTopLevel || vref.IsCompilerGenerated)
-                                && not (vref.IsMember || vref.IsMemberOrModuleBinding)
-                            then
-                                Zset.elements (eenv.tyenv.AsUserProvidedTypars())
-                            else
-                                [])
+                     // For module-scope re-hosted closures (ownerTycon = None) the owning
+                     // module class has 0 type parameters, so no type arguments are
+                     // consumed by the class; all type arguments bind the method itself.
+                     | Some info when info.ownerTycon.IsNone -> []
+                     | Some info -> info.ownerTypars
+                     | None ->
+                         // Re-hosted TLR closures are compiled as top-level methods that are
+                         // not member/module bindings. Only those inherit the host class's
+                         // typars; ordinary module functions (e.g. MyCollections.IEnumerator.check)
+                         // must not, or a non-generic module gets spurious generic args.
+                         if
+                             (vref.IsCompiledAsTopLevel || vref.IsCompilerGenerated)
+                             && not (vref.IsMember || vref.IsMemberOrModuleBinding)
+                         then
+                             Zset.elements (eenv.tyenv.AsUserProvidedTypars())
+                         else
+                             [])
 
                 | _ -> []
 
@@ -4862,8 +4865,10 @@ and GenApp (cenv: cenv) cgbuf eenv (f, fty, tyargs, curriedArgs, m) sequel =
                 | Some _ when not vref.IsExtensionMember -> List.length (vref.MemberApparentEntity.Typars |> DropErasedTypars)
                 | _ when cenv.g.realsig ->
                     (match cenv.g.RealsigClosureParentTryGet(vref.Deref) with
-                        | Some info -> List.length info.ownerTypars
-                        | None -> List.length ambientTypars)
+                     // Module-scope re-hosted closures own no class type arguments.
+                     | Some info when info.ownerTycon.IsNone -> 0
+                     | Some info -> List.length info.ownerTypars
+                     | None -> List.length ambientTypars)
                 | _ -> 0
 
             let ilEnclArgTys, ilMethArgTys =
@@ -10342,25 +10347,34 @@ and GenMethodForBinding
     // so the body's references to the class typars fall back to ChooseTyparSolution
     // (concrete types) instead of the class's !0/!1.
     let eenvUnderMethLambdaTypars =
-        if cenv.g.realsig && not (Option.isSome v.MemberInfo) && not v.IsExtensionMember then
+        if
+            cenv.g.realsig
+            && not (Option.isSome v.MemberInfo)
+            && not (
+                v.IsExtensionMember
+                || (match g.RealsigClosureParentTryGet v with
+                    | Some info when info.ownerTycon.IsNone -> true
+                    | _ -> false)
+            )
+        then
             let ambientTypars =
                 match v.MemberInfo with
                 | Some _ when not v.IsExtensionMember -> []
                 | _ when cenv.g.realsig ->
                     (match cenv.g.RealsigClosureParentTryGet(v) with
-                        | Some info -> info.ownerTypars
-                        | None ->
-                            // Re-hosted TLR closures are compiled as top-level methods that are
-                            // not member/module bindings. Only those inherit the host class's
-                            // typars; ordinary module functions (e.g. MyCollections.IEnumerator.check)
-                            // must not, or a non-generic module gets spurious generic args.
-                            if
-                                (v.IsCompiledAsTopLevel || v.IsCompilerGenerated)
-                                && not (v.IsMember || v.IsMemberOrModuleBinding)
-                            then
-                                Zset.elements (eenv.tyenv.AsUserProvidedTypars())
-                            else
-                                [])
+                     | Some info -> info.ownerTypars
+                     | None ->
+                         // Re-hosted TLR closures are compiled as top-level methods that are
+                         // not member/module bindings. Only those inherit the host class's
+                         // typars; ordinary module functions (e.g. MyCollections.IEnumerator.check)
+                         // must not, or a non-generic module gets spurious generic args.
+                         if
+                             (v.IsCompiledAsTopLevel || v.IsCompilerGenerated)
+                             && not (v.IsMember || v.IsMemberOrModuleBinding)
+                         then
+                             Zset.elements (eenv.tyenv.AsUserProvidedTypars())
+                         else
+                             [])
 
                 | _ -> []
 

@@ -941,6 +941,9 @@ type internal TcGlobals =
     /// [realsig+] Look up the registered RealsigClosureParentInfo for a closure Val, if any.
     member RealsigClosureParentTryGet: TypedTree.Val -> RealsigClosureParentInfo option
 
+    /// [realsig+] Remove the old closureVal entry and re-add it under newVal. If oldVal has no entry, this is a no-op.
+    member RealsigClosureParentRekey: TypedTree.Val * TypedTree.Val -> unit
+
     /// [realsig+] Return the original (non-cloned) owner typars across every registered
     /// RealsigClosureParentInfo. The consumer should match by Name+Range (not Stamp), since TLR
     /// works on cloned typars that share the original's Name/Range but not its Stamp.
