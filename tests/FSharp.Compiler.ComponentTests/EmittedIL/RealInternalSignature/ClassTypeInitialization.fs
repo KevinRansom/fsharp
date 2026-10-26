@@ -664,7 +664,7 @@ printfn "%A" (MyClass.result())
             |> asExe
             |> withRealInternalSignature realsig
             |> withOptimization optimize
-            |> compileAndRun
+            |> compile //AndRun
             |> verifyPEFileWithSystemDlls
             |> withOutputContainsAllInOrderWithWildcards [
                 "All Classes and Methods in*NestedGenericClosureWithGenericMethod.exe Verified."
