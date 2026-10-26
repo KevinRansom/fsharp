@@ -4804,11 +4804,21 @@ and ConsiderSplitToMethod flag threshold cenv env (e, einfo) =
             let freeInSplit = freeInExpr (CollectLocalsWithStackGuard()) e
             let splitTypars = freeInSplit.FreeTyvars.FreeTypars |> Zset.elements
             if not (List.isEmpty splitTypars) then
+                // [realsig+] Locate the host (owner) tycon the split body closes over. The
+                // free locals of the split body are the members of the host class (e.g. the
+                // thisCast/objCast fields of `BigGenericTuple<'a>`). Their types appear as
+                // either `TType_app(tcr,_)` (a direct generic application) or
+                // `TType_ucase(uc,_)` (a union-case field, whose `uc.TyconRef` is the host
+                // tycon). Pick the first free local whose type references a generic host tycon.
                 let splitTycon =
                     Zset.elements freeInSplit.FreeLocals
                     |> List.tryPick (fun (v: Val) ->
                         match v.Type with
                         | TType_app(tcr, _, _) when not (List.isEmpty tcr.Typars) -> Some tcr
+                        | TType_ucase(uc, _) ->
+                            let hostTcr = uc.TyconRef
+                            if not (List.isEmpty hostTcr.Typars) then Some hostTcr
+                            else None
                         | _ -> None)
                 g.AddRealsigClosureParent(fv, splitTypars, splitTycon)
         mkInvisibleLet m fv (mkLambda m uv (e, ty))

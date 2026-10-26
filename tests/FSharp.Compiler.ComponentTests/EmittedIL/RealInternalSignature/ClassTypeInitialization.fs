@@ -983,12 +983,10 @@ type internal AgedLookup<'Token, 'Key, 'Value when 'Value: not struct>(keepStron
     [<InlineData(false, false)>]        // Regular NoOptimize
     [<Theory>]
     let ``BigTuples`` (realSig, optimize) =
+        let path = __SOURCE_DIRECTORY__ ++ "BigTuples.fs"
+        let source = File.ReadAllText (path)
 
-        FSharp """
-namespace Equality
-
-type BigGenericTuple<'a> = BigGenericTuple of int * 'a * byte * int * 'a * byte
-    """
+        FSharp source
         |> withName "BigTuples"
         |> asLibrary
         |> withRealInternalSignature realSig
