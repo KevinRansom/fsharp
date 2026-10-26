@@ -61,6 +61,22 @@ let IsNonErasedTypar (tp: Typar) = not tp.IsErased
 
 let DropErasedTypars (tps: Typar list) = tps |> List.filter IsNonErasedTypar
 
+/// [realsig+] Diagnostic logging (env-var gated: set FSHARP_REALSIG_DEBUG=1 to enable).
+/// Disabled by default (no-op in production); enable only when investigating re-hosting bugs.
+/// Logs to %TEMP%\realsig.log (override with FSHARP_REALSIG_DEBUG_FILE).
+let private realsigDebugLog (msg: string) =
+    if
+        (System.Environment.GetEnvironmentVariable("FSHARP_REALSIG_DEBUG")
+            |> Option.ofObj
+            |> Option.map (fun s -> s = "1" || s = "true")
+            |> Option.defaultValue false)
+    then
+        let path =
+            System.Environment.GetEnvironmentVariable("FSHARP_REALSIG_DEBUG_FILE")
+            |> Option.ofObj
+            |> Option.defaultValue (System.IO.Path.Combine(System.IO.Path.GetTempPath(), "realsig.log"))
+        System.IO.File.AppendAllText(path, msg + "\n")
+
 let DropErasedTyargs tys =
     tys
     |> List.filter (fun ty ->
@@ -1519,12 +1535,52 @@ let GetValReprTypeInfoInCompiledForm g valReprInfo (vref: ValRef) m =
     let tps, witnessInfos, curriedArgInfos, returnTy, retInfo =
         GetValReprTypeInCompiledForm g valReprInfo numEnclosingTypars vref.Type m
 
-    let tps =
+    // [realsig+] For a closure re-hosted as a nested static method of its host class, the
+    // method must declare the owner (host-class) typars as leading generic parameters
+    // (so that the body can reference them as !0..!k) followed by the method's own
+    // typars (indices k+1..n-1, emitted as !!...). The historical ownerTypars @ tps
+    // branch did not achieve this, because tps (the stripped list from
+    // GetValReprTypeInCompiledForm) already excludes the enclosing typars when
+    // numEnclosingTypars > 0, so the method's declared count was too small for the
+    // body's references — the resulting FSharpFunc<T,?> (a vs b) mismatch is the
+    // "2 errors in memoize@6" symptom. The fix: rebuild the parameter list as
+    // [ownerTypars (from RealsigClosureParent)] + [method's own typars (from
+    // vref.Type = TyLambda([...], ...), which for a re-hosted TLR closure carries
+    // its own typars in TpsAll form)]. vref.Type is used instead of tps because
+    // tps has had the leading numEnclosingTypars entries already dropped.
+    let v = vref.Deref
+    let nm = try v.DisplayName with _ -> "?"
+    let tyTag =
+        match vref.Type with
+        | TType_forall(tpsAll, _) -> "TyLambda(" + string (List.length tpsAll) + ")"
+        | _ -> "non-TyLambda"
+    let parentTag =
+        match g.RealsigClosureParentTryGet v with
+        | None -> "None"
+        | Some info ->
+            "Some(ownerTyconSome=" + string info.ownerTycon.IsSome + " ownerCount=" + string (List.length info.ownerTypars) + " owner=[ "
+            + (info.ownerTypars |> List.map (fun (t: Typar) -> t.Name + "@" + string t.Stamp + (string t.Range)) |> String.concat "; ")
+            + " ])"
+    realsigDebugLog (sprintf "[GValRepr] nm=%s realsig=%b ctop=%b MemberInfoSome=%b numEnc=%d parent=%s tpsCount=%d vrefType=%s"
+                        nm g.realsig vref.IsCompiledAsTopLevel v.MemberInfo.IsSome numEnclosingTypars
+                        (*  ^ numEnclosingTypars may be used here; suppress warning *)
+                        parentTag
+                        (List.length tps)
+                        tyTag)
+    let tpsAfter =
         match g.RealsigClosureParentTryGet(vref.Deref) with
-        | Some info when g.realsig && vref.IsCompiledAsTopLevel && info.ownerTycon.IsSome -> info.ownerTypars @ tps
-        | _ -> tps
+        | Some info when g.realsig && vref.IsCompiledAsTopLevel && info.ownerTycon.IsSome ->
+            let own =
+                match vref.Type with
+                | TType_forall(tpsAll, _) -> tpsAll
+                | _ -> []
+            realsigDebugLog (sprintf "[GValRepr] nm=%s FIX-APPLY: prepend ownerCount=%d ownCount=%d -> %d total" nm (List.length info.ownerTypars) (List.length own) (List.length info.ownerTypars + List.length own))
+            info.ownerTypars @ own
+        | _ ->
+            realsigDebugLog (sprintf "[GValRepr] nm=%s PASS-THROUGH: keeping tpsCount=%d" nm (List.length tps))
+            tps
 
-    tps, witnessInfos, curriedArgInfos, returnTy, retInfo
+    tpsAfter, witnessInfos, curriedArgInfos, returnTy, retInfo
 
 /// Determine how a top level value is represented, when it is being represented
 /// as a method.
@@ -7801,10 +7857,15 @@ and GetIlxClosureFreeVars cenv m (thisVars: ValRef list) boxity eenv takenNames 
         let ilCloTypeRef = NestedTypeRefForCompLoc eenv.cloc cloName
 
         let initialFreeTyvars =
+            let userTypars = eenv.tyenv.AsUserProvidedTypars()
+            let userTyparsList = userTypars |> Zset.elements
+            realsigDebugLog (sprintf "[GetIlxClosureFreeVars] cloName=%s realsig=%b userTyparsCount=%d userTypars=[%s]"
+                            cloName g.realsig (List.length userTyparsList)
+                            (userTyparsList |> List.map (fun (t: Typar) -> t.Name + "@" + string t.Stamp) |> String.concat "; "))
             match g.realsig with
             | true ->
                 { emptyFreeTyvars with
-                    FreeTypars = eenv.tyenv.AsUserProvidedTypars()
+                    FreeTypars = userTypars
                 }
             | false -> emptyFreeTyvars
 
@@ -10378,6 +10439,12 @@ and GenMethodForBinding
 
                 | _ -> []
 
+            let nm2 = v.DisplayName
+            realsigDebugLog (sprintf "[GMethodForBinding] nm=%s ambient=%d methLambda=%d methLambdaTypars=[%s]"
+                            nm2
+                            (List.length ambientTypars)
+                            (List.length methLambdaTypars)
+                            (methLambdaTypars |> List.map (fun (t: Typar) -> t.Name + "@" + string t.Stamp) |> String.concat "; "))
             if List.isEmpty ambientTypars then
                 EnvForTypars methLambdaTypars eenv
             else

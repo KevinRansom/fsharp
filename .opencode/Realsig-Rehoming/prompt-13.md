@@ -31,7 +31,7 @@ artifacts\bin\fsc\Release\net472\fsc.exe --nologo tests\FSharp.Compiler.Componen
 artifacts\bin\fsc\Release\net472\fsc.exe --nologo tests\FSharp.Compiler.ComponentTests\EmittedIL\Inlining\Regression_TLR_MutualInnerRec_Generic.fs --realsig- --optimize+ --out:artifacts\Temp\_Regression_TLR_MutualInnerRec_Generic_RealsigMinusOptimisePlus.exe
 
 Convert to il using:
-ldasm artifacts\Temp\Regression_TLR_MutualInnerRec_Generic_RealsigPlusOptimisePlus.exe -out:artifacts\Temp\Regression_TLR_MutualInnerRec_Generic_RealsigPlusOptimisePlus.il
+ildasm artifacts\Temp\Regression_TLR_MutualInnerRec_Generic_RealsigPlusOptimisePlus.exe -out:artifacts\Temp\Regression_TLR_MutualInnerRec_Generic_RealsigPlusOptimisePlus.il
 
 SECTION B - BUG STATEMENT (SINGLE INVARIANT)
 I have compiled and generated the il at: artifacts\Temp\Regression_TLR_MutualInnerRec_Generic_RealsigPlusOptimisePlus.il
@@ -59,7 +59,7 @@ I beleive they are expected to look like:
 At least that is what realsig- generates
 
 They result in ilverify output of using the script 
-    artifacts\Temp\Regression_TLR_MutualInnerRec_Generic.peverifierCommandPath.cmd
+    artifacts\Temp\GenericClassConstrainedClosure.peverifierCommandPath.cmd
 
 Verifying [Regression_TLR_MutualInnerRec_Generic_RealsigPlusOptimisePlus]Regression_TLR_MutualInnerRec_Generic.outer
 [IL]: Error [MissingMethod]: [c:\kevinransom\fsharp\artifacts\Temp\Regression_TLR_MutualInnerRec_Generic_RealsigPlusOptimisePlus.exe : Regression_TLR_MutualInnerRec_Generic::outer(!!0, !!0)] Missing method '!0 Regression_TLR_MutualInnerRec_Generic<!!0>.a@4(!0, Int32, !0)'

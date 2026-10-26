@@ -12257,6 +12257,23 @@ and TcLetBinding (cenv: cenv) isUse env containerInfo declKind tpenv (synBinds, 
         let tpenv = HideUnscopedTypars generalizedTypars tpenv
         let valSchemes = NameMap.map (UseCombinedValReprInfo g declKind rhsExpr) prelimValSchemes2
         let values = MakeAndPublishVals cenv env (altActualParent, false, declKind, ValNotInRecScope, valSchemes, attrs, xmlDoc, literalValue)
+
+        // [realsig+] Register every top-level (non-rec) let inside a class-body so re-hosting
+        // (GetValReprTypeInfoInCompiledForm / GenMethodForBinding / GetIlxClosureFreeVars)
+        // knows the host-type typars it inherits. The rec-binding site (TcLetrecGeneralizeBinding
+        // at ~line 13344) only fires for `let rec`; a lone `let` in a member body (e.g. `memoize`
+        // at tests/.../GenericClassConstrainedClosure.fs:6) goes through TcLetBinding and was
+        // previously left unregistered — RealsigClosureParentTryGet(closureVal.Stamp) then
+        // returned None and the whole re-hosting fix silently did not apply.
+        if g.realsig then
+            match env.eFamilyType with
+            | Some hostTycon ->
+                let hostTypars = hostTycon.Typars
+                if not (List.isEmpty hostTypars) then
+                    NameMap.iter (fun pair ->
+                        let (v: Val) = fst pair
+                        g.AddRealsigClosureParent(v, hostTypars, Some hostTycon)) values
+            | None -> ()
         let checkedPat = tcPatPhase2 (TcPatPhase2Input (values, true))
         let prelimRecValues =
             let prelimRecValues = NameMap.map fst values

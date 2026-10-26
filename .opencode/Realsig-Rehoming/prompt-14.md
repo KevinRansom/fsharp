@@ -24,6 +24,10 @@ Coding:
 When adding code to an F# source code file always check if the line following
 your insertion point is an and binding. If it is and you are adding a let
 binding, make your let binding be an and binding also.
+FSharp is indendent significant before inserting code ensure the indent of the inserted code is correct
+
+build the compiler.
+.\build.cmd -c release
 
 Repro:
 Compilation:
@@ -33,13 +37,13 @@ artifacts\bin\fsc\Release\net472\fsc.exe --nologo tests\FSharp.Compiler.Componen
 Convert to il using:
 ldasm artifacts\Temp\GenericClassConstrainedClosure_RealsigPlusOptimisePlus.exe -out:artifacts\Temp\GenericClassConstrainedClosure_RealsigPlusOptimisePlus.il
 
+c:\kevinransom\fsharp>where ildasm
+C:\Program Files (x86)\Microsoft SDKs\Windows\v10.0A\bin\NETFX 4.7.2 Tools\ildasm.exe
+
 SECTION B - BUG STATEMENT (SINGLE INVARIANT)
-I have compiled and generated the il at: artifacts\Temp\Regression_TLR_MutualInnerRec_Generic_RealsigPlusOptimisePlus.il
+run the script: artifacts\Temp\GenericClassConstrainedClosure.peverifierCommandPath.cmd
 
-I have compiled and generated the il at: artifacts\Temp\GenericClassConstrainedClosure_RealsigPlusOptimisePlus.il
-
-The result of using ilverify on the built exe with the script -- artifacts\Temp\GenericClassConstrainedClosure.peverifierCommandPath.cmd
-are:
+observe the output includes:
 Verifying [GenericClassConstrainedClosure_RealsigPlusOptimisePlus]Sample.worker
 Verifying [GenericClassConstrainedClosure_RealsigPlusOptimisePlus]Sample.main
 Verifying [GenericClassConstrainedClosure_RealsigPlusOptimisePlus]Cache`1..ctor
@@ -73,7 +77,7 @@ Verifying [Regression_TLR_MutualInnerRec_Generic_RealsigPlusOptimisePlus]<Module
 Verifying [Regression_TLR_MutualInnerRec_Generic_RealsigPlusOptimisePlus]Regression_TLR_MutualInnerRec_Generic
 Verifying [Regression_TLR_MutualInnerRec_Generic_RealsigPlusOptimisePlus]<StartupCode$Regression_TLR_MutualInnerRec_Generic_RealsigPlusOptimisePlus>.$Regression_TLR_MutualInnerRec_Generic
 
-Please investigate these errors nd propose a fix, 
+Please investigate these errors and propose a fix, 
 
 
 Ensure it compiles and that it adds the necessary typar information.  Once this is complete I will verify it and we will work on the next step.
