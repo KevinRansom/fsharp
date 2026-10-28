@@ -12273,7 +12273,33 @@ and TcLetBinding (cenv: cenv) isUse env containerInfo declKind tpenv (synBinds, 
                     NameMap.iter (fun pair ->
                         let (v: Val) = fst pair
                         g.AddRealsigClosureParent(v, hostTypars, Some hostTycon)) values
-            | None -> ()
+            | None ->
+                // [realsig+] Module-scope (no family type) non-rec closure: register any
+                // typars free in the closure's full type but not declared by its own
+                // signature (e.g. a surrounding function's inference typar the body
+                // captures via a bound local). These are the surrounding function's
+                // declared typars that the closure must NOT re-require as its own generic
+                // parameters. Mirrors the rec-binding site (TcLetrecGeneralizeBinding),
+                // which only fires for `let rec`; a lone `let` goes through here. Without
+                // this, RealsigClosureParentTryGet returns None, the TLR reqdTypars
+                // owner-typar filter (InnerLambdasToTopLevelFuncs packEnv) is skipped, and
+                // the re-hosted closure re-declares the typar it already captures, yielding
+                // a generic-parameter index out of bounds at its instantiation site.
+                // Guard on `values` being non-empty: a `let _ = ...` (wildcard) binding
+                // publishes no vals, so there is nothing to register and we skip.
+                if not (NameMap.isEmpty values) then
+                    let declaredTypars0 = allDeclaredTypars
+                    let (v0: Val) = NameMap.toList values |> List.head |> snd |> fst
+                    let allFreeTyvars = (freeInType CollectAllNoCaching (v0.TauType)).FreeTypars |> Zset.elements
+                    let familyTypars =
+                        allFreeTyvars
+                        |> List.filter (fun (t: Typar) ->
+                               not (List.exists (fun (d: Typar) -> d.Name = t.Name && d.Range = t.Range) declaredTypars0))
+                        |> List.distinctBy (fun (t: Typar) -> (t.Name, t.Range))
+                    if not (List.isEmpty familyTypars) then
+                        NameMap.iter (fun pair ->
+                            let (v: Val) = fst pair
+                            g.AddRealsigClosureParent(v, familyTypars, None)) values
         let checkedPat = tcPatPhase2 (TcPatPhase2Input (values, true))
         let prelimRecValues =
             let prelimRecValues = NameMap.map fst values
