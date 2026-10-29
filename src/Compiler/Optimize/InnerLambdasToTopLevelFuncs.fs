@@ -225,11 +225,13 @@ module Pass1_DetermineTLRAndArities =
 #endif
         // #5302: a module-level static lifted out of its family would lose access to a protected base
         // field (FieldAccessException), so refuse the lift.
+        // realsig+ shouldn't have this problem because no lift is performed, so we don't refuse it.
         elif
-            g.langVersion.SupportsFeature LanguageFeature.AccessProtectedBaseFieldFromClosure
+            (not g.realsig) && g.langVersion.SupportsFeature LanguageFeature.AccessProtectedBaseFieldFromClosure
             && exprReferencesProtectedILField amap e
         then
             None
+
         else
             // Could the binding be TLR? with what arity?
             let atTopLevel = Zset.contains f xinfo.TopLevelBindings
