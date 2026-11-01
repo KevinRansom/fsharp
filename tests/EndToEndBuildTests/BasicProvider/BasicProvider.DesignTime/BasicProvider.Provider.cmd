@@ -1,0 +1,1 @@
+c:\kevinransom\fsharp\artifacts\bin\fsc\Release\net472\fsc.exe @BasicProvider.Provider.rsp

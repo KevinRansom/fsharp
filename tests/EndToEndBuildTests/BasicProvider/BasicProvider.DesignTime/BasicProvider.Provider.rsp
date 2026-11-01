@@ -1,0 +1,55 @@
+-o:obj\Release\net472\BasicProvider.DesignTime.dll
+--debug:portable
+--embed:obj\Release\net472\BasicProvider.DesignTime.AssemblyInfo.fs
+--sourcelink:c:\kevinransom\fsharp\tests\EndToEndBuildTests\BasicProvider\BasicProvider.DesignTime\obj\Release\net472\BasicProvider.DesignTime.sourcelink.json
+--noframework
+--compressmetadata+
+--define:IS_DESIGNTIME
+--define:RELEASE
+--define:NETFRAMEWORK
+--define:NET472
+--define:NET20_OR_GREATER
+--define:NET30_OR_GREATER
+--define:NET35_OR_GREATER
+--define:NET40_OR_GREATER
+--define:NET45_OR_GREATER
+--define:NET451_OR_GREATER
+--define:NET452_OR_GREATER
+--define:NET46_OR_GREATER
+--define:NET461_OR_GREATER
+--define:NET462_OR_GREATER
+--define:NET47_OR_GREATER
+--define:NET471_OR_GREATER
+--define:NET472_OR_GREATER
+--optimize+
+--resource:obj\Release\net472\ILLink.Substitutions.xml,ILLink.Substitutions.xml
+-r:C:\Users\kevinr\.nuget\packages\fsharp.core\10.0.101\lib\netstandard2.0\FSharp.Core.dll
+-r:C:\Program Files (x86)\Reference Assemblies\Microsoft\Framework\.NETFramework\v4.7.2\mscorlib.dll
+-r:C:\Program Files (x86)\Reference Assemblies\Microsoft\Framework\.NETFramework\v4.7.2\System.Core.dll
+-r:C:\Program Files (x86)\Reference Assemblies\Microsoft\Framework\.NETFramework\v4.7.2\System.Data.dll
+-r:C:\Program Files (x86)\Reference Assemblies\Microsoft\Framework\.NETFramework\v4.7.2\System.dll
+-r:C:\Program Files (x86)\Reference Assemblies\Microsoft\Framework\.NETFramework\v4.7.2\System.Drawing.dll
+-r:C:\Program Files (x86)\Reference Assemblies\Microsoft\Framework\.NETFramework\v4.7.2\System.IO.Compression.FileSystem.dll
+-r:C:\Program Files (x86)\Reference Assemblies\Microsoft\Framework\.NETFramework\v4.7.2\System.Numerics.dll
+-r:C:\Program Files (x86)\Reference Assemblies\Microsoft\Framework\.NETFramework\v4.7.2\System.Runtime.Serialization.dll
+-r:C:\Program Files (x86)\Reference Assemblies\Microsoft\Framework\.NETFramework\v4.7.2\System.Xml.dll
+-r:C:\Program Files (x86)\Reference Assemblies\Microsoft\Framework\.NETFramework\v4.7.2\System.Xml.Linq.dll
+-r:C:\Program Files (x86)\Reference Assemblies\Microsoft\Framework\.NETFramework\v4.7.2\Facades\netstandard.dll
+--target:library
+--warn:3
+--warnaserror:3239
+--fullpaths
+--flaterrors
+--subsystemversion:6.00
+--highentropyva+
+--targetprofile:mscorlib
+--nocopyfsharpcore
+--deterministic+
+--simpleresolution
+--realsig+
+obj\Release\net472\BasicProvider.DesignTime.AssemblyInfo.fs
+obj\Release\net472\.NETFramework,Version=v4.7.2.AssemblyAttributes.fs
+..\BasicProvider\BasicProvider.Runtime.fs
+..\..\ProvidedTypes\ProvidedTypes.fsi
+..\..\ProvidedTypes\ProvidedTypes.fs
+BasicProvider.Provider.fs
