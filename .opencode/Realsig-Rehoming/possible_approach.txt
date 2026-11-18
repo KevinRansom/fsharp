@@ -1,0 +1,96 @@
+I'm not even sure we have a plan.  Indeed we don't have a plan.  I want to go through a process of creating a plan.  But I don't have sufficiently rigorous documentation or a crisp idea of what to ask for.  No I know what to ask for, but I don't know how to ask it in a way that will keep you narrow and focused.
+
+I want realsig+ to rehome optimised inner closures on the class in which they were generated.
+
+this source file: artifacts\Temp\nested_generic_closure.fs
+When compiled with the current build using this command:
+
+..\..\artifacts\bin\fsc\Release\net11.0\fsc nested_generic_closure.fs --realsig- --optimize- --out:realsigminusoptimizeminus artifacts\Temp.exe
+
+if we run ildasm on it the il looks like:
+Produces this IL:  artifacts\Temp\realsigplusoptimizeminus.il
+
+When compiled with these options:
+..\..\artifacts\bin\fsc\Release\net11.0\fsc nested_generic_closure.fs --realsig+ --optimize- --out:realsigplusoptimizeminus.exe
+
+Produces this IL:  artifacts\Temp\realsigplusoptimizeminus.il
+
+As you can see realsig+ moves the closure class onto the hosting class.
+
+We need realsig+ to have the same effect.
+
+The reason for this change is that the only way moving the closure vals to the module class works is that all private f# memberss must be emitted to il as internal members.
+
+The realsig + change is to allow the il to reflect the fsharp scoping primitives rather than having il not aligned with the source code.
+
+The closure is emmitted to the right place by ilxgen the problem is the optimizer and TLR code emits, explicit IL code, well not quite but pretty close.  In all of the Transformation code.  It seems to me that the closure generates method bodies and transforms method calls to invoke the generated closure funtion.  In order to get the metho call transformation correct it needs to know the method arguments, trim off the ambient typars from the nested generic class hierarchy wrapping it, and what the class that will host the method.  It does not seem that the code generator can really do that.
+
+A large source of user disatisfaction with new releases of the f# compiler occur when we change the F# metadata format, doing that compatibly is very hard.  So We need to try to do this without causing that grief.  If we pass in DeclaringEntity the 'declaringEntity' older compilers wont know what to do with it.  I'm not certain that's true, but I expect it is.
+
+I am struggling to figure out how to get the necessary data in there.  Since MakeTopLevelRepresentationDecisions takes bindings we need to figure out how to get the ambient typars in to TLR somehow.  right at the moment i'm clueless.
+
+=====================================================================
+
+
+You're right about the direction. I had it backwards: --realsig+ --optimize- (closures) already does the re-homing — your two IL dumps prove it. The problem is only --realsig+ --optimize+, where TLR rewrites the closure into a module-level static. The goal is to make that optimize+ path produce a class-level method on the class of the declaring member, with the right typar split, instead of a module static with all-typars-flat. I'm also dropping the "RuntimeHelpers" worry — that's just the test module in nested_generic_closure.fs (line 187), not a compiler-internal artifact. I misread that.
+The hard constraint, as I now understand it:
+- Pickled / cross-assembly visible (cannot change shape): Val's public shape — name, parent (TryDeclaringEntity / MemberInfo.ApparentEnclosingEntity), public Type. Typar identity (its stamp). The F# signature metadata. Old compilers and FSI sessions read these.
+- Implementation-only (softer, changes the optimization .mresource, not the public type): the fHat's Val.Type and ValReprInfo (both private, compiler-generated), the Expr.App shape at the rewritten call sites. I can change these but should be deliberate about it.
+- Transient (safe to add fields freely): everything in InnerLambdasToTopLevelFuncs.fs — Pass2_DetermineReqdItems.state, ReqdItemsForDefn, PackedReqdItems, the pass interface maps (tlrS, arityM, fclassM, envPackM, fHatM), Pass4's RewriteContext / RewriteState. None of this crosses a compiler session boundary.
+So the constraint "no pickling change" is satisfiable: the emitted fHat can keep its public shape (name + parent + public type), and we can only touch the private/transient layers. That's the room to work in.
+You're stuck on "how does the ambient class context reach TLR." My tentative answer, with the one fact I'd verify before committing to it:
+The ambient context is in the typed tree at TLR time — it's the Tycon node the TLR walker already passes through (TransImplFile ? TransModuleContents ? Tycon ? member body). It's just not recorded by any of the TLR passes today: Pass2's ExprEnvIntercept (line 531) only intercepts LetRec / Let / App / Val / Op — it doesn't track class context. So the context is there, in the tree, but not in the pass state.
+Two ways to get it into TLR, in order of increasing change:
+- (a) Extend Pass2's state with a classStack: (TyconRef * Typar list) list, Push/Pop on entering/leaving a member body. This is a TypedTreeOps walker change — a new intercept or a FoldImplFile extension.
+- (b) A pre-scan over the impl file that produces a Zmap<Val, (TyconRef * Typar list)> key by the fHat's source Val, fed to Pass2 as a parallel map alongside reqdItemsMap. No TypedTreeOps change. Pass2 reads the map at accBinds (line 553) to split ctps vs etps.
+I lean (b) — it's a self-contained addition to InnerLambdasToTopLevelFuncs.fs, doesn't touch the typed-tree walkers, and the pre-scan is a pure function of the impl file (the typed tree we already have). The split at accBinds becomes: ctps_part = freeTypars ? (pre-scan[class of binding]).ctps and etps_part = freeTypars \ ctps_part. That feeds PackedReqdItems.ep_ctps (new field) and ep_etps (existing, now only the method typars).
+The one fact I need to verify before I'd commit to that: can the fHat's Val.Type be a member-style TType (shape C[ctps] ? (method-params) ? ret) on a ParentNone Val, without tripping IsMember or ValReprInfo checks elsewhere? If yes, the plan is a TLR-output change and codegen mostly works as-is. If no (i.e. codegen's "member vs function" decision is driven by Val.MemberInfo, which I can't change), the plan needs a codegen-side context check (eenv.cloc is the class ? treat the top-level non-member fHat as a class-level method), and the work splits between TLR (split the typars) and codegen (flip the emission path).
+Can I verify that one fact? Or do you want me to dig into which codegen path the module-level fHat is currently going through (so we know what to flip), and settle the plan around that?
+
+
+
+
+=====================================================================
+
+Verified. The fact that decides the whole plan is confirmed, and it points the other way from my last tentative guess.
+The fact
+In codegen, the choice of (a) class-level member vs module-level static, and (b) whether to split the val's typars into class-tyvars (ctps) + method-tyvars (etps) is made at one dispatch, and it keys only on Val.MemberInfo.IsSome — not on the shape of the public Val.Type:
+// IlxGen.fs:1746-1752  (ComputeStorageForValWithValReprInfo)
+match GetValReprTypeInFSharpForm ... with
+| [], [], returnTy, _ when not vref.IsMember ->
+    ComputeStorageForFSharpValue ...                              // static field
+| _ ->
+    match vref.MemberInfo with
+    | Some memberInfo when not vref.IsExtensionMember ->
+        ComputeStorageForFSharpMember cenv valReprInfo memberInfo vref m   // <-- SPLIT path
+    | _ ->
+        ComputeStorageForFSharpFunctionOrFSharpExtensionMember ...         // <-- NO split
+- IsMember is defined as x.MemberInfo.IsSome — TypedTree.fs:3094. It is not derived from the type shape.
+- The split path (ComputeStorageForFSharpMember ? GetMethodSpecForMemberVal) does the split with ctps, mtps = List.splitAt numParentTypars tps — IlxGen.fs:1490 — but it first does parentTcref = vref.DeclaringEntity — IlxGen.fs:1483 ? TypedTree.fs:3256-3259, which throws for a val with no parent.
+- The no-split path computes numEnclosingTypars = CountEnclosingTyparsOfActualParentOfVal, which returns 0 when not v.IsMember — FreeVars.fs:658-664 — i.e. all typars stay method-typars.
+Consequence (this is the crux)
+The fHat that TLR creates is exactly a member-less val: mkLocalNameTypeArity builds it via Construct.NewVal(..., ParentNone) — InnerLambdasToTopLevelFuncs.fs:90. So every fHat falls into the no-split, module-level branch.
+Therefore: giving the fHat a "member-shaped" public TType does nothing. The split is hard-gated on MemberInfo.IsSome, and the only way to reach it is to set MemberInfo, which changes IsMember + the parent/public shape — exactly the "passing in DeclaringEntity" change you said older compilers can't consume and that you don't want. So "rework the typed-tree shape of the fHat's public type" is not the route.
+But the good news, which resolves the worry "how do I get the hosting class in there": you don't have to store it in the Val at all. The hosting class is already eenv.cloc at the moment the fHat's storage is computed. The realsig+ effectiveCloc already selects the class over the module:
+// IlxGen.fs:10675-10687
+if cenv.g.realsig then
+    cloc            // the type that "originated the closure" — already the class
+else
+    eenv.moduleCloc
+and AllocValReprWithinExpr calls ComputeAndAddStorageForLocalValWithValReprInfo (... ) effectiveCloc v eenv — IlxGen.fs:10689-10693 — so the class is on the stack, as the cloc argument, right at the dispatch that is mis-routed.
+What this means for the plan
+The single missing capability is a new branch at ComputeStorageForValWithValReprInfo: "realsig+ && top-level && non-member && cloc is a generic class ? emit as a class-level method, split the leading |cloc.TypeParams| typars as ctps." It reuses the same List.splitAt ctps.Length algorithm as IlxGen.fs:1490, driven by the class in cloc rather than by a MemberInfo. This:
+- touches no Val field ? no pickling/parent/TryDeclaringEntity change, which is your non-negotiable;
+- leaves the public Val.Type shape alone (the split happens at emission, so the observable class-level method still reads as a member of the class);
+- is a codegen-local addition, not a TLR-data-transport problem.
+The TLR-side ep_ctps/ep_etps split and the two-tier call-site rewrite are necessary but not sufficient on their own: without this codegen branch, codegen throws them away (member-less ? numEnclosingTypars=0).
+One thing I have NOT verified (so I won't assert it as done)
+I've read the dispatch and split machinery, but I have not traced this specific repro to confirm that for --realsig+ --optimize+ on nested_generic_closure.fs, the TLR fHat for takeInner/takeOuter actually passes through AllocValReprWithinExpr with the class as cloc (vs. landing in the CompLocForInitClass / moduleCloc branch at IlxGen.fs:10677-10678). That branch decision depends on eenv.moduleCloc.Enclosing.IsEmpty, and I want to confirm ConcatEnumerator (nested in module RuntimeHelpers) takes the cloc limb and not the init-class limb.
+Do you want me to verify that one step (trace the takeInner fHat emit path for the realsig+ optimize+ case end-to-end), or do you want to settle the branch-shape question first — i.e., confirm you're happy the fix lives in a new codegen branch (rather than reusing ComputeStorageForFSharpMember), because that's the load-bearing decision the rest of the plan hangs off?
+
+=================================================================================
+
+InnerLambdasToTopLevelFunctions needs to split the ambient typars from typars for the generated method.  Because the realsig- function is on a non generic module class, whereas the realsig+ type can be on a generic type. from a method with it's own non-host typars
+
+====================================================================================
+
