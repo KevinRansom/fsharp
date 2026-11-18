@@ -2261,15 +2261,6 @@ and TypeDefsBuilder() =
         try
             tdefs[nm] |> List.head |> snd |> fst
         with :? KeyNotFoundException ->
-            printfn "FindTypeDefBuilder: searching for name = %A" nm
-            printfn "FindTypeDefBuilder: tdefs contains %d key(s)" tdefs.Count
-            for kv in tdefs do
-                let key = kv.Key
-                let entries = kv.Value
-                printfn "  key = %A (list length = %d)" key entries.Length
-                for (sortKey, (tb, eliminate)) in entries do
-                    printfn "    sortKey = %A ; ILTypeDef.Name = %A ; eliminateIfEmpty = %A"
-                        sortKey (tb.ILTypeDef.Name) eliminate
             failwith ("FindTypeDefBuilder: " + nm + " not found")
 
     member b.FindNestedTypeDefsBuilder path =
