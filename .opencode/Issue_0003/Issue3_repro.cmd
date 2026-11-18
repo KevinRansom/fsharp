@@ -1,0 +1,1 @@
+C:\kevinransom\fsharp\artifacts\bin\fsc\Release\net472\fsc.exe @C:\kevinransom\fsharp\.opencode\Issue_0003\Issue3_repro.rsp
