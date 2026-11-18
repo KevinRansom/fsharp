@@ -259,6 +259,7 @@
     <Compile Include="EmittedIL\RealInternalSignature\ClassTypeVisibilityModuleRoot.fs" />
     <Compile Include="EmittedIL\RealInternalSignature\ClassTypeVisibility.fs" />
     <Compile Include="EmittedIL\RealInternalSignature\ClassTypeInitialization.fs" />
+    <Compile Include="EmittedIL\RealInternalSignature\CrossAssemblyRealSigComparisonSurface.fs" />
     <Compile Include="EmittedIL\RealInternalSignature\RealInternalSignature.fs" />
     <Compile Include="EmittedIL\SkipLocalsInit.fs" />
     <Compile Include="EmittedIL\StringFormatAndInterpolation.fs" />
